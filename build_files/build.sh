@@ -50,6 +50,7 @@ chmod 0600 "/usr/lib/modules/$KVER/initramfs.img"
 
 ### Services
 systemctl enable vettv-dosbox-x-flatpak.service
+systemctl enable vettv-grow-root.service
 
 ### Policy guard: no ROMs/BIOS/Microsoft system files in the image
 hits=$(find / -xdev \( -iname '*.rom' -o -iname 'bios*.bin' -o -iname '*.bios' \

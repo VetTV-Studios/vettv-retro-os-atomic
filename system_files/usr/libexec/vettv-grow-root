@@ -1,0 +1,29 @@
+#!/usr/bin/bash
+# VetTV Retro OS: grow the root partition and btrfs to fill the disk on first boot.
+# The raw/qcow2 disk ships with a ~20 GiB root; this fills a larger USB drive.
+set -euo pipefail
+STAMP=/var/lib/vettv/grow-root.done
+[ -e "$STAMP" ] && exit 0
+
+ROOTDEV=$(findmnt -n -o SOURCE --target /sysroot | sed 's/\[.*\]$//')
+[ -b "$ROOTDEV" ] || { echo "root source $ROOTDEV is not a block device; skipping"; exit 0; }
+[ "$(lsblk -n -d -o TYPE "$ROOTDEV")" = part ] || { echo "$ROOTDEV is not a partition; skipping"; exit 0; }
+DISK=/dev/$(lsblk -n -d -o PKNAME "$ROOTDEV")
+PARTN=$(cat /sys/class/block/"$(basename "$ROOTDEV")"/partition)
+echo "root $ROOTDEV = partition $PARTN on $DISK"
+
+# Move the backup GPT header to the real end of the disk (image was written to a bigger drive).
+sfdisk --relocate gpt-bak-std "$DISK" || true
+# Grow the root partition only if it is the last one.
+LAST=$(sfdisk -l -o Device "$DISK" | awk '/^\/dev\//{d=$1} END{print d}')
+if [ "$LAST" = "$ROOTDEV" ]; then
+  echo ", +" | sfdisk --no-reread --no-tell-kernel -N "$PARTN" "$DISK"
+  partx -u -n "$PARTN" "$DISK" || true
+else
+  echo "root is not the last partition ($LAST); not resizing partition"
+fi
+# /var is a writable mount of the same btrfs filesystem.
+btrfs filesystem resize max /var
+btrfs filesystem show /var
+mkdir -p "$(dirname "$STAMP")"
+date -Is > "$STAMP"
