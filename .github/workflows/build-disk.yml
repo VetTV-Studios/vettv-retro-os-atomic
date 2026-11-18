@@ -40,7 +40,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        disk-type: ["qcow2", "anaconda-iso"]
+        disk-type: ["qcow2", "anaconda-iso", "raw"]
     permissions:
       contents: read
       packages: read
@@ -87,6 +87,17 @@ jobs:
           chown: ${{ env.USER_UID }}:${{ env.USER_GID }}
           types: ${{ matrix.disk-type }}
           additional-args: --use-librepo=True
+
+      - name: Compress raw disk and write sha256 (USB flashing)
+        if: matrix.disk-type == 'raw'
+        run: |
+          set -euo pipefail
+          cd "${{ steps.build.outputs.output-directory }}"
+          RAW=$(find . -name '*.raw' -type f | head -1)
+          test -n "$RAW"
+          xz -T0 -6 "$RAW"
+          find . -name '*.raw.xz' -type f -exec sha256sum {} \; > SHA256SUMS-raw.txt
+          cat SHA256SUMS-raw.txt
 
       - name: Upload disk images and Checksum to Job Artifacts
         if: inputs.upload-to-s3 != true && github.event_name != 'pull_request'
