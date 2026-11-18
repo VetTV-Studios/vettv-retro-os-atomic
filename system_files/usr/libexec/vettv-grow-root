@@ -25,5 +25,13 @@ fi
 # /var is a writable mount of the same btrfs filesystem.
 btrfs filesystem resize max /var
 btrfs filesystem show /var
+# Stamp only when the filesystem really fills the partition (kernel saw the new size).
+PART_B=$(blockdev --getsize64 "$ROOTDEV")
+FS_B=$(btrfs device usage -b /var | awk -v d="$ROOTDEV" '$0 ~ d && /Device size/ {print $NF; exit}')
+[ -z "$FS_B" ] && FS_B=$(btrfs filesystem show --raw /var | awk '/devid/ {print $4; exit}')
+echo "partition $PART_B bytes, btrfs $FS_B bytes"
+if [ -z "$FS_B" ] || [ $((FS_B * 100 / PART_B)) -lt 99 ]; then
+  echo "btrfs does not fill the partition yet; will retry next boot"; exit 1
+fi
 mkdir -p "$(dirname "$STAMP")"
 date -Is > "$STAMP"
