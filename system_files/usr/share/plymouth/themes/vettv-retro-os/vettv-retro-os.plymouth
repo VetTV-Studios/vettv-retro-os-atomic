@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=VetTV Retro OS
+Description=VetTV Retro OS boot splash (original VetTV art, CRT Glow dark)
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/vettv-retro-os
+ScriptFile=/usr/share/plymouth/themes/vettv-retro-os/vettv-retro-os.script

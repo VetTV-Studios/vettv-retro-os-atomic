@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48"><defs>
+<linearGradient id="fb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5B8FD6"/><stop offset="1" stop-color="#2F5FA3"/></linearGradient>
+<linearGradient id="fk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1E3A5F"/><stop offset="1" stop-color="#0B2A5C"/></linearGradient>
+<linearGradient id="st" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#C9D1DC"/><stop offset="1" stop-color="#8C96A6"/></linearGradient>
+<radialGradient id="cd" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#F4F1EA"/><stop offset=".55" stop-color="#9CC0E8"/><stop offset=".8" stop-color="#C9D1DC"/><stop offset="1" stop-color="#8C96A6"/></radialGradient>
+</defs><path d="M15.3 31.0 A10 10 0 0 1 32.7 31.0" fill="none" stroke="#9CC0E8" stroke-width="4" stroke-linecap="round"/><path d="M7.469999999999999 26.5 A19 19 0 0 1 40.53 26.5" fill="none" stroke="#3F78C4" stroke-width="4" stroke-linecap="round"/><path d="M-0.35999999999999943 22.0 A28 28 0 0 1 48.36 22.0" fill="none" stroke="#0B2A5C" stroke-width="4" stroke-linecap="round"/><circle cx="24" cy="38" r="3.5" fill="#F2B233"/></svg>

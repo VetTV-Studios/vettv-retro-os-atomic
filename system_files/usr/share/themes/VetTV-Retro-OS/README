@@ -1,0 +1,3 @@
+Window-button PNGs (min/max/close x normal/hover/pressed, 16/24) from theme-art export.
+Not yet a full GTK/metacity theme: STYLE_GUIDE open item 1 (which Mint-Y fork + licence). Until then
+the Mint-Y-Dark-Blue theme is the dark default and these buttons are staged for the fork.

@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=VetTV first login
+Exec=/usr/libexec/vettv/plasma-first-login.sh
+OnlyShowIn=KDE;
+X-KDE-autostart-phase=2
+NoDisplay=true

@@ -1,0 +1,7 @@
+[Sound Theme]
+Name=VetTV
+Comment=VetTV original synthesized sounds (review build: RetroOS Lead, then Vet)
+Directories=stereo
+
+[stereo]
+OutputProfile=stereo

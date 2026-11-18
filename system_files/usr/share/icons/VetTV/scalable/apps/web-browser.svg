@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48"><defs>
+<linearGradient id="fb" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5B8FD6"/><stop offset="1" stop-color="#2F5FA3"/></linearGradient>
+<linearGradient id="fk" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1E3A5F"/><stop offset="1" stop-color="#0B2A5C"/></linearGradient>
+<linearGradient id="st" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#C9D1DC"/><stop offset="1" stop-color="#8C96A6"/></linearGradient>
+<radialGradient id="cd" cx=".5" cy=".5" r=".5"><stop offset="0" stop-color="#F4F1EA"/><stop offset=".55" stop-color="#9CC0E8"/><stop offset=".8" stop-color="#C9D1DC"/><stop offset="1" stop-color="#8C96A6"/></radialGradient>
+</defs><rect x="4" y="4" width="40" height="40" rx="7" fill="url(#fk)" stroke="#0B1C3A" stroke-width="1"/><path d="M8 6.5 h32" stroke="#FFFFFF" stroke-opacity=".3"/><circle cx="24" cy="24" r="13" fill="url(#fb)" stroke="#9CC0E8" stroke-width="1.5"/><ellipse cx="24" cy="24" rx="5.5" ry="13" fill="none" stroke="#9CC0E8" stroke-width="1.2"/><path d="M11 24 h26 M13 17 h22 M13 31 h22" stroke="#9CC0E8" stroke-width="1.2"/><circle cx="33" cy="33" r="4" fill="#F2B233" stroke="#B07A1C"/></svg>
