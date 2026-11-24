@@ -76,10 +76,13 @@ jobs:
             ${IMAGE_NAME} \
             ${DEFAULT_TAG}
 
-      - name: Save pre-rechunk labels
+      # build-chunked-oci drops all labels; without org.opencontainers.image.version
+      # bootc writes a null aleph version and bootloader-update fails (bootupd#1166).
+      # Hand the full label set to the rechunker (--label), set at creation.
+      - name: Prepare labels for the rechunker
         run: |
-          podman image inspect "localhost/${IMAGE_NAME}:${DEFAULT_TAG}" --format '{{json .Labels}}' > /tmp/pre-labels.json
-          cat /tmp/pre-labels.json
+          command -v skopeo || { sudo apt-get update -q && sudo apt-get install -yq skopeo; }
+          bash .github/scripts/restore_labels.sh prepare "localhost/${IMAGE_NAME}:${DEFAULT_TAG}"
 
       # This is optional, this provides smaller delta updates
       - name: Rechunk with rpm-ostree
@@ -89,12 +92,8 @@ jobs:
             ${IMAGE_NAME} \
             ${DEFAULT_TAG}
 
-      # build-chunked-oci drops all labels; without org.opencontainers.image.version
-      # bootc writes a null aleph version and bootloader-update fails (bootupd#1166)
-      - name: Restore labels (label-only, layers unchanged)
-        run: |
-          command -v skopeo || { sudo apt-get update -q && sudo apt-get install -yq skopeo; }
-          bash .github/scripts/restore_labels.sh "localhost/${IMAGE_NAME}:${DEFAULT_TAG}" /tmp/pre-labels.json
+      - name: Verify labels on the chunked image
+        run: bash .github/scripts/restore_labels.sh verify "localhost/${IMAGE_NAME}:${DEFAULT_TAG}"
 
       # If you are feeling adventurous, use the new distro agnostic rechunker
       # https://github.com/coreos/chunkah

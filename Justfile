@@ -173,6 +173,13 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
 
     GRAPHROOT="$(podman info --format '{{ '{{.Store.GraphRoot}}' }}')"
 
+    # Labels for the chunked image (build-chunked-oci drops all labels otherwise);
+    # written by .github/scripts/restore_labels.sh prepare, NUL-separated KEY=VALUE
+    LABEL_ARGS=()
+    if [[ -f /tmp/rechunk-labels ]]; then
+        while IFS= read -r -d '' kv; do LABEL_ARGS+=("--label=${kv}"); done < /tmp/rechunk-labels
+    fi
+
     podman run --rm --pull=never --privileged \
       --mount=type=image,src="${target_image}:${tag}",target=/rpm-ostree \
       --mount=type=bind,src=${GRAPHROOT},target=/run/host-container-storage,rw \
@@ -183,6 +190,7 @@ ostree-rechunk $target_image=image_name $tag=default_tag:
       --max-layers 127 \
       --format-version=2 \
       --bootc \
+      "${LABEL_ARGS[@]}" \
       --rootfs /rpm-ostree \
       --output "containers-storage:[overlay@/run/host-container-storage+/run/rpm-ostree-storage]localhost/${target_image}:${tag}"
 
