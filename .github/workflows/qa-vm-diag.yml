@@ -1,0 +1,91 @@
+---
+# QA diag run (Faye 11-24, final run on bootloader-update): ONE fresh 64G qcow2
+# overlay on the verified raw, booted with -nic none and a test-only login that
+# exists ONLY as QEMU SMBIOS systemd credentials (sysusers.extra +
+# passwd.plaintext-password.*). Nothing is baked into the image; the raw is not
+# modified and the overlay is never written host-side. Diagnostics are captured
+# over the serial console. Uploads only logs and screenshots (password redacted).
+name: QA VM diag
+
+on:
+  workflow_dispatch:
+    inputs:
+      raw-artifact:
+        required: true
+        default: "14961772182"
+      raw-xz-sha256:
+        required: true
+        default: "63d916f2677af7cad41633d21bb080c2b3ccc8d3d886033a65911c3bd509a200"
+      raw-sha256:
+        required: true
+        default: "64ee3e71df651d0cc3caf49e746f9b8b77126b285f07dc682521e66f2b3d631b"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  diag:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      OUT: ${{ github.workspace }}/qa-out
+      WORK: /mnt/qa
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prep runner, KVM, QEMU
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup "$AGENT_TOOLSDIRECTORY" || true
+          sudo mkdir -p "$WORK" && sudo chown "$USER" "$WORK"; mkdir -p "$OUT/shots"
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          sudo apt-get update -q && sudo apt-get install -yq qemu-system-x86 qemu-utils ovmf gdisk btrfs-progs ostree netpbm >/dev/null
+          ls -l /dev/kvm; qemu-system-x86_64 --version | head -1
+      - name: Fetch raw and verify hashes (stop on mismatch)
+        working-directory: ${{ env.WORK }}
+        run: |
+          gh api "repos/${{ github.repository }}/actions/artifacts/${{ inputs.raw-artifact }}/zip" > raw.zip
+          sha256sum raw.zip | tee "$OUT/hashes.txt"; unzip -q raw.zip && rm raw.zip
+          XZ=$(find . -name disk.raw.xz | head -1); got=$(sha256sum "$XZ" | cut -d' ' -f1)
+          echo "$got  disk.raw.xz (expected ${{ inputs.raw-xz-sha256 }})" | tee -a "$OUT/hashes.txt"
+          [ "$got" = "${{ inputs.raw-xz-sha256 }}" ] || { echo "RAW XZ HASH MISMATCH"; exit 1; }
+          xz -dc -T0 "$XZ" | cp --sparse=always /dev/stdin disk.raw; rm -f "$XZ"
+          got=$(sha256sum disk.raw | cut -d' ' -f1)
+          echo "$got  disk.raw before boot (expected ${{ inputs.raw-sha256 }})" | tee -a "$OUT/hashes.txt"
+          [ "$got" = "${{ inputs.raw-sha256 }}" ] || { echo "RAW HASH MISMATCH"; exit 1; }
+          chmod a-w disk.raw
+          qemu-img create -q -f qcow2 -b "$WORK/disk.raw" -F raw D.qcow2 64G
+          qemu-img info D.qcow2 | tee -a "$OUT/hashes.txt"
+      - name: Per-run test password (never printed or uploaded)
+        run: |
+          PW=$(python3 -c 'import secrets; print(secrets.token_hex(16))')
+          echo "::add-mask::$PW"
+          umask 077; printf '%s' "$PW" > "$RUNNER_TEMP/qa.pw"
+      - name: "Diag boot: credential login on ttyS0, capture over serial"
+        run: |
+          python3 .github/scripts/qa_vm_diag.py --disk "$WORK/D.qcow2" --out "$OUT" \
+            --pwfile "$RUNNER_TEMP/qa.pw" --script .github/scripts/qa_diag_guest.sh
+      - name: Host-side read-only inspection of the overlay after shutdown
+        if: always()
+        run: sudo bash .github/scripts/qa_inspect.sh "$WORK/D.qcow2" "$OUT/D-after-inspect.txt" || true
+      - name: Redact password, verify raw hash again, drop disks
+        if: always()
+        run: |
+          PW=$(cat "$RUNNER_TEMP/qa.pw")
+          sudo chown -R "$USER" "$OUT"
+          grep -rlF -- "$PW" "$OUT" | while read -r f; do sed -i "s/$PW/[REDACTED]/g" "$f"; echo "redacted: $f"; done
+          if grep -rqF -- "$PW" "$OUT"; then echo "password still present; removing files"; grep -rlF -- "$PW" "$OUT" | xargs rm -f; fi
+          rm -f "$RUNNER_TEMP/qa.pw" "$RUNNER_TEMP"/cred-*
+          got=$(sha256sum "$WORK/disk.raw" | cut -d' ' -f1)
+          echo "$got  disk.raw after run (expected ${{ inputs.raw-sha256 }})" | tee -a "$OUT/hashes.txt"
+          rm -f "$WORK/D.qcow2" "$WORK/disk.raw"
+          find "$OUT" -type f | sort; du -sh "$OUT"
+          [ "$got" = "${{ inputs.raw-sha256 }}" ] || { echo "RAW CHANGED"; exit 1; }
+      - name: Upload QA evidence (logs and screenshots only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-vm-diag-${{ github.run_id }}
+          path: qa-out/
+          retention-days: 14
