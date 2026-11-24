@@ -59,7 +59,7 @@ jobs:
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
           sudo apt-get update -q
-          sudo apt-get install -yq qemu-system-x86 qemu-utils ovmf gdisk btrfs-progs python3 >/dev/null
+          sudo apt-get install -yq qemu-system-x86 qemu-utils ovmf gdisk btrfs-progs ostree netpbm python3 >/dev/null
           ls -l /dev/kvm
           qemu-system-x86_64 --version | head -1 | tee "$OUT/qemu-version.txt"
 
@@ -80,6 +80,7 @@ jobs:
           xz -dc -T0 "$XZ" | cp --sparse=always /dev/stdin disk.raw
           rm -f "$XZ"
           sha256sum disk.raw | tee -a "$OUT/hashes.txt"
+          echo "expected image: ghcr.io/vettv-studios/vettv-retro-os@sha256:11a980d5a11fda7608ff8bd750a7dbb12a0acddc457816cb1893d4a91bd0db0c (run 45472109345)" | tee -a "$OUT/hashes.txt"
           qemu-img create -f qcow2 -b "$WORK/disk.raw" -F raw gate.qcow2 64G
           df -h /mnt | tee -a "$OUT/df-before.txt"
 
@@ -94,6 +95,15 @@ jobs:
 
       - name: Inspect guest disk after boot 2
         run: sudo bash .github/scripts/qa_inspect.sh "$WORK/gate.qcow2" "$OUT/boot2-inspect.txt"
+
+      - name: Power-cut test (fresh 64G disk, kill QEMU mid first boot, then boot again)
+        run: |
+          rm -f /tmp/ovmf-vars.fd
+          qemu-img create -f qcow2 -b "$WORK/disk.raw" -F raw "$WORK/cut.qcow2" 64G
+          python3 .github/scripts/qa_vm_boot.py --disk "$WORK/cut.qcow2" --out "$OUT" --tag cut1 --wait 25 --kill
+          python3 .github/scripts/qa_vm_boot.py --disk "$WORK/cut.qcow2" --out "$OUT" --tag cut2 --wait 420
+          sudo bash .github/scripts/qa_inspect.sh "$WORK/cut.qcow2" "$OUT/cut2-inspect.txt"
+          rm -f "$WORK/cut.qcow2"
 
       - name: Hash qcow2 artifact (not booted)
         if: always()

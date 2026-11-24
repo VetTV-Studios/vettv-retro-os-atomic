@@ -7,6 +7,7 @@ import argparse, json, os, socket, subprocess, sys, time, shutil
 ap = argparse.ArgumentParser()
 ap.add_argument("--disk"); ap.add_argument("--out"); ap.add_argument("--tag")
 ap.add_argument("--wait", type=int, default=420)
+ap.add_argument("--kill", action="store_true", help="hard power cut instead of ACPI shutdown")
 a = ap.parse_args()
 
 code = next(p for p in ["/usr/share/OVMF/OVMF_CODE_4M.fd", "/usr/share/OVMF/OVMF_CODE.fd"] if os.path.exists(p))
@@ -37,9 +38,13 @@ def q(c, **args):
 f.readline(); q("qmp_capabilities")
 t0 = time.time(); n = 0
 while time.time() - t0 < a.wait and p.poll() is None:
-    time.sleep(30); n += 1
+    time.sleep(min(30, a.wait)); n += 1
     q("screendump", filename=os.path.join(a.out, "shots", f"{a.tag}-{n:02d}-{int(time.time()-t0)}s.ppm"))
-q("system_powerdown")
+if a.kill:
+    print(f"{a.tag}: hard kill at {int(time.time()-t0)}s", flush=True)
+    p.kill(); p.wait()
+else:
+  q("system_powerdown")
 try:
     p.wait(timeout=180)
 except subprocess.TimeoutExpired:

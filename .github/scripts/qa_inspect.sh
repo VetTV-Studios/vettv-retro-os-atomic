@@ -21,6 +21,16 @@ echo "== stamp"; ls -l "$VAR/lib/vettv/grow-root.done" 2>&1
 ETC=$(find $M -maxdepth 6 -type d -path '*/deploy/*/deploy/*/etc' | head -1)
 echo "== os-release"; cat "$ETC/os-release" 2>/dev/null || cat "$(dirname "$ETC")/usr/lib/os-release"
 echo "== ostree deployments"; ls "$M"/ostree/deploy/*/deploy/ 2>&1
+cat "$M"/ostree/deploy/*/deploy/*.origin 2>/dev/null
+echo "== image digest (ostree commit metadata)"
+for c in $(ls "$M"/ostree/deploy/*/deploy/ | grep -v origin | sed 's/\.[0-9]*$//' | sort -u); do
+  ostree --repo="$M/ostree/repo" show "$c" 2>/dev/null | grep -i digest
+  ostree --repo="$M/ostree/repo" show --print-metadata-key=ostree.manifest-digest "$c" 2>/dev/null
+done
+echo "== ESP and /boot hashes"
+for pn in $(lsblk -nrpo NAME,FSTYPE,PARTLABEL /dev/nbd0 | awk '$2=="vfat"||$2=="ext4"||$2=="xfs"{print $1}'); do
+  echo "$(sha256sum "$pn" | cut -d' ' -f1)  $pn ($(lsblk -nro FSTYPE,PARTLABEL "$pn"))"
+done
 J="$VAR/log/journal"
 if [ -d "$J" ]; then
   echo "== boots"; journalctl -D "$J" --list-boots --no-pager
