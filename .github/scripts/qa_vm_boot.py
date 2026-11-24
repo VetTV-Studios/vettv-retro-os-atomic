@@ -8,6 +8,8 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--disk"); ap.add_argument("--out"); ap.add_argument("--tag")
 ap.add_argument("--wait", type=int, default=420)
 ap.add_argument("--kill", action="store_true", help="hard power cut instead of ACPI shutdown")
+ap.add_argument("--kill-on", default=None, help="regex on serial log; hard-kill when it appears")
+ap.add_argument("--kill-delay", type=float, default=0.0)
 a = ap.parse_args()
 
 code = next(p for p in ["/usr/share/OVMF/OVMF_CODE_4M.fd", "/usr/share/OVMF/OVMF_CODE.fd"] if os.path.exists(p))
@@ -37,6 +39,25 @@ def q(c, **args):
         if "return" in r or "error" in r: return r
 f.readline(); q("qmp_capabilities")
 t0 = time.time(); n = 0
+if a.kill_on:
+    import re
+    rx = re.compile(a.kill_on)
+    while time.time() - t0 < a.wait and p.poll() is None:
+        try:
+            txt = open(serial, errors="replace").read()
+        except FileNotFoundError:
+            txt = ""
+        if rx.search(txt):
+            time.sleep(a.kill_delay)
+            print(f"{a.tag}: matched {a.kill_on!r}; hard kill at {time.time()-t0:.2f}s", flush=True)
+            open(os.path.join(a.out, f"{a.tag}-kill.txt"), "w").write(f"kill-on {a.kill_on} delay {a.kill_delay}s at {time.time()-t0:.2f}s\n")
+            break
+        time.sleep(0.05)
+    else:
+        print(f"{a.tag}: pattern never seen; hard kill at timeout", flush=True)
+    q("screendump", filename=os.path.join(a.out, "shots", f"{a.tag}-01-kill.ppm")); n = 1
+    a.kill = True
+    a.wait = 0
 while time.time() - t0 < a.wait and p.poll() is None:
     time.sleep(min(30, a.wait)); n += 1
     q("screendump", filename=os.path.join(a.out, "shots", f"{a.tag}-{n:02d}-{int(time.time()-t0)}s.ppm"))

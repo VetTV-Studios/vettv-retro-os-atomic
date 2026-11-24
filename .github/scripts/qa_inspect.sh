@@ -12,22 +12,28 @@ echo "== sgdisk -p"; sgdisk -p /dev/nbd0
 ROOT=$(lsblk -nrpo NAME,FSTYPE /dev/nbd0 | awk '$2=="btrfs"{print $1}' | tail -1)
 echo "root partition: $ROOT size $(blockdev --getsize64 "$ROOT") bytes"
 M=/tmp/qa-root; mkdir -p $M
-mount -o ro,subvolid=5 "$ROOT" $M || mount -o ro "$ROOT" $M
+mount -o ro,subvolid=5 "$ROOT" $M || mount -o ro,subvolid=5,rescue=nologreplay "$ROOT" $M || mount -o ro "$ROOT" $M
 echo "== btrfs filesystem show"; btrfs filesystem show "$ROOT"
 echo "== btrfs usage"; btrfs filesystem usage -b $M | head -8
+OS=$(find $M -maxdepth 3 -type d -name ostree -path '*ostree' | head -1); OS=${OS:-$M/ostree}; echo "ostree dir: $OS"
 VAR=$(find $M -maxdepth 6 -type d -path '*/deploy/*/var' | head -1); echo "var dir: $VAR"
 [ -d "$M/var" ] && [ -z "$VAR" ] && VAR=$M/var
 echo "== stamp"; ls -l "$VAR/lib/vettv/grow-root.done" 2>&1
-ETC=$(find $M -maxdepth 6 -type d -path '*/deploy/*/deploy/*/etc' | head -1)
-echo "== os-release"; cat "$ETC/os-release" 2>/dev/null || cat "$(dirname "$ETC")/usr/lib/os-release"
-echo "== ostree deployments"; ls "$M"/ostree/deploy/*/deploy/ 2>&1
-cat "$M"/ostree/deploy/*/deploy/*.origin 2>/dev/null
+DEP=$(ls -d "$OS"/deploy/*/deploy/*.0 2>/dev/null | head -1); echo "deployment: $DEP"
+echo "== os-release"; cat "$DEP/usr/lib/os-release"
+echo "== ostree deployments"; ls "$OS"/deploy/*/deploy/ 2>&1
+cat "$OS"/deploy/*/deploy/*.origin 2>/dev/null
 echo "== image digest (ostree commit metadata)"
-for c in $(ls "$M"/ostree/deploy/*/deploy/ | grep -v origin | sed 's/\.[0-9]*$//' | sort -u); do
-  ostree --repo="$M/ostree/repo" show "$c" 2>/dev/null | grep -i digest
-  ostree --repo="$M/ostree/repo" show --print-metadata-key=ostree.manifest-digest "$c" 2>/dev/null
+for c in $(ls "$OS"/deploy/*/deploy/ | grep -v origin | sed 's/\.[0-9]*$//' | sort -u); do
+  ostree --repo="$OS/repo" show "$c" 2>/dev/null | grep -i digest
+  ostree --repo="$OS/repo" show --print-metadata-key=ostree.manifest-digest "$c" 2>/dev/null
 done
-echo "== ESP and /boot hashes"
+echo "== ESP and /boot file-content hashes (mounted ro, noload)"
+for pn in $(lsblk -nrpo NAME,FSTYPE /dev/nbd0 | awk '$2=="vfat"||$2=="ext4"{print $1}'); do
+  B=/tmp/qa-p; mkdir -p $B; o=ro; [ "$(lsblk -nro FSTYPE $pn)" = ext4 ] && o=ro,noload
+  mount -o $o "$pn" $B && (cd $B && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | sed "s|-|$pn files|"; find . -type f | wc -l) ; umount $B
+done
+echo "== ESP and /boot raw device hashes"
 for pn in $(lsblk -nrpo NAME,FSTYPE,PARTLABEL /dev/nbd0 | awk '$2=="vfat"||$2=="ext4"||$2=="xfs"{print $1}'); do
   echo "$(sha256sum "$pn" | cut -d' ' -f1)  $pn ($(lsblk -nro FSTYPE,PARTLABEL "$pn"))"
 done
