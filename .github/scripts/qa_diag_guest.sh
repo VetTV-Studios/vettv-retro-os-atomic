@@ -10,6 +10,19 @@ secb(){ n=$1; shift; printf '\n@@B64BEGIN %s@@\n' "$n"; ( eval "$*" ) 2>&1 | xz 
 BOOTS=($(journalctl --list-boots -q --no-pager 2>/dev/null | awk '{print $2}'))
 FIRST=${BOOTS[0]}
 printf '@@INFO boots=%s first=%s@@\n' "${#BOOTS[@]}" "$FIRST"
+ALEPH='cat /sysroot/.bootc-aleph.json; echo; echo "--- version field:"; grep -o "\"version\":[^,}]*" /sysroot/.bootc-aleph.json'
+if [ "${#BOOTS[@]}" -le 1 ]; then
+  # first power-on boot 1: quick capture before bazzite-hardware-setup reboots (~47 s)
+  sec b1-01-systemctl-status-bootloader-update 'systemctl status bootloader-update --no-pager -l'
+  sec b1-02-journal-bootloader-update 'journalctl -b 0 -u bootloader-update --no-pager -o short-monotonic'
+  sec b1-03-aleph "$ALEPH"
+  sec b1-04-bootupctl-status 'bootupctl status'
+  sec b1-05-systemctl-failed 'systemctl --failed --no-pager'
+  printf '\n@@BOOT1DONE@@\n'
+  exit 0
+fi
+timeout 240 systemctl is-system-running --wait; sleep 15
+sec 00-aleph "$ALEPH"
 RX='ostree|rpm-ostree|bootc|reboot|finaliz|stag|rebase|signed|ublue|bazzite|first.?boot|systemctl reboot'
 sec 01-systemctl-status-bootloader-update 'systemctl status bootloader-update --no-pager -l'
 sec 02-journal-bootloader-update-b0 'journalctl -b 0 -u bootloader-update --no-pager -o short-monotonic'
@@ -41,8 +54,11 @@ sec 14a-ostree-admin-status 'ostree admin status'
 sec 14b-origin 'for f in /ostree/deploy/default/deploy/*.origin; do echo "=== $f"; cat "$f"; done'
 sec 15a-firstboot-unit-files "systemctl list-unit-files --no-pager | grep -Ei 'ublue|bazzite|rebase|signing|firstboot|first-boot'"
 sec 15b-firstboot-unit-cat "for u in \$(systemctl list-unit-files --no-pager --no-legend | grep -Ei 'ublue|bazzite|rebase|signing|firstboot|first-boot' | awk '\$2==\"enabled\"||\$2==\"static\"||\$2==\"alias\"{print \$1}'); do echo \"===== \$u\"; systemctl cat \"\$u\" --no-pager; done"
-sec 16a-bootupctl-update-vvv 'bootupctl update -vvv'
-sec 16b-bootupctl-status-after-update 'bootupctl status'
-sec 16c-restart-bootloader-update 'systemctl restart bootloader-update; systemctl status bootloader-update --no-pager -l; journalctl -b 0 -u bootloader-update --no-pager -o short-monotonic'
 sec 17-efi-boot-log 'journalctl -b 0 -k --no-pager | grep -Ei "efi|secure" | head -40; mokutil --sb-state 2>&1'
-printf '\n@@ALLDONE@@\n'
+ESPH='cd /boot/efi && find . -type f -print0 | sort -z | xargs -0 sha256sum'
+sec 18a-esp-tree-before-update "$ESPH | tee /run/esp-before.txt"
+sec 18b-bootupctl-update-vvv 'bootupctl update -vvv'
+sec 18c-esp-tree-after-update "$ESPH | tee /run/esp-after.txt"
+sec 18d-esp-tree-diff 'diff /run/esp-before.txt /run/esp-after.txt && echo "ESP file tree UNCHANGED"'
+sec 18e-bootupctl-status-after-update 'bootupctl status'
+printf '\n@@ALLDONE@@\n' 

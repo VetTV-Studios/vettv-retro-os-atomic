@@ -28,6 +28,10 @@ on:
         description: "expected GitHub artifact digest of the qcow2 zip"
         required: true
         default: "b2b4d8dfe52368de5ee1f1dedb9e9cda9e12ffdb10142491d5fd71950c323ee5"
+      expected-image:
+        description: "image the raw was built from (recorded in hashes.txt)"
+        required: true
+        default: "ghcr.io/vettv-studios/vettv-retro-os@sha256:11a980d5a11fda7608ff8bd750a7dbb12a0acddc457816cb1893d4a91bd0db0c (run 45472109345)"
 
 permissions:
   contents: read
@@ -80,7 +84,7 @@ jobs:
           xz -dc -T0 "$XZ" | cp --sparse=always /dev/stdin disk.raw
           rm -f "$XZ"
           sha256sum disk.raw | tee -a "$OUT/hashes.txt"
-          echo "expected image: ghcr.io/vettv-studios/vettv-retro-os@sha256:11a980d5a11fda7608ff8bd750a7dbb12a0acddc457816cb1893d4a91bd0db0c (run 45472109345)" | tee -a "$OUT/hashes.txt"
+          echo "expected image: ${{ inputs.expected-image }}" | tee -a "$OUT/hashes.txt"
           qemu-img create -f qcow2 -b "$WORK/disk.raw" -F raw gate.qcow2 64G
           df -h /mnt | tee -a "$OUT/df-before.txt"
 

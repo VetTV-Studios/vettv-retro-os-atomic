@@ -1,10 +1,11 @@
 ---
-# QA diag run (Faye 11-24, final run on bootloader-update): ONE fresh 64G qcow2
-# overlay on the verified raw, booted with -nic none and a test-only login that
-# exists ONLY as QEMU SMBIOS systemd credentials (sysusers.extra +
-# passwd.plaintext-password.*). Nothing is baked into the image; the raw is not
-# modified and the overlay is never written host-side. Diagnostics are captured
-# over the serial console. Uploads only logs and screenshots (password redacted).
+# QA diag run (Faye 11-24): ONE fresh 64G qcow2 overlay (its own disk, never a
+# gate disk) on the verified raw, -nic none. A diagnostic unit arrives ONLY as
+# QEMU SMBIOS systemd credentials (systemd.extra-unit + script) and runs on both
+# first-power-on boots, dumping to ttyS0. No login, no password. Nothing is baked
+# into the image; the raw is not modified and the overlay is never written
+# host-side. bootupctl update -vvv (a real write) runs last, with the ESP file
+# tree hashed before and after. Uploads only logs and screenshots.
 name: QA VM diag
 
 on:
@@ -19,6 +20,10 @@ on:
       raw-sha256:
         required: true
         default: "64ee3e71df651d0cc3caf49e746f9b8b77126b285f07dc682521e66f2b3d631b"
+      expected-digest:
+        description: "image digest rpm-ostree must report as booted"
+        required: true
+        default: "sha256:11a980d5a11fda7608ff8bd750a7dbb12a0acddc457816cb1893d4a91bd0db0c"
 
 permissions:
   contents: read
@@ -57,31 +62,38 @@ jobs:
           chmod a-w disk.raw
           qemu-img create -q -f qcow2 -b "$WORK/disk.raw" -F raw D.qcow2 64G
           qemu-img info D.qcow2 | tee -a "$OUT/hashes.txt"
-      - name: Per-run test password (never printed or uploaded)
+      - name: "Diag boot: credential-delivered unit on both first-power-on boots, capture over serial"
         run: |
-          PW=$(python3 -c 'import secrets; print(secrets.token_hex(16))')
-          echo "::add-mask::$PW"
-          umask 077; printf '%s' "$PW" > "$RUNNER_TEMP/qa.pw"
-      - name: "Diag boot: credential login on ttyS0, capture over serial"
-        run: |
-          python3 .github/scripts/qa_vm_diag.py --disk "$WORK/D.qcow2" --out "$OUT" \
-            --pwfile "$RUNNER_TEMP/qa.pw" --script .github/scripts/qa_diag_guest.sh
+          python3 .github/scripts/qa_vm_diag.py --unit-only --disk "$WORK/D.qcow2" --out "$OUT" \
+            --script .github/scripts/qa_diag_guest.sh
       - name: Host-side read-only inspection of the overlay after shutdown
         if: always()
         run: sudo bash .github/scripts/qa_inspect.sh "$WORK/D.qcow2" "$OUT/D-after-inspect.txt" || true
-      - name: Redact password, verify raw hash again, drop disks
+      - name: Verify raw hash again, drop disks
         if: always()
         run: |
-          PW=$(cat "$RUNNER_TEMP/qa.pw")
           sudo chown -R "$USER" "$OUT"
-          grep -rlF -- "$PW" "$OUT" | while read -r f; do sed -i "s/$PW/[REDACTED]/g" "$f"; echo "redacted: $f"; done
-          if grep -rqF -- "$PW" "$OUT"; then echo "password still present; removing files"; grep -rlF -- "$PW" "$OUT" | xargs rm -f; fi
-          rm -f "$RUNNER_TEMP/qa.pw" "$RUNNER_TEMP"/cred-*
+          rm -f "$RUNNER_TEMP"/cred-*
           got=$(sha256sum "$WORK/disk.raw" | cut -d' ' -f1)
           echo "$got  disk.raw after run (expected ${{ inputs.raw-sha256 }})" | tee -a "$OUT/hashes.txt"
           rm -f "$WORK/D.qcow2" "$WORK/disk.raw"
           find "$OUT" -type f | sort; du -sh "$OUT"
           [ "$got" = "${{ inputs.raw-sha256 }}" ] || { echo "RAW CHANGED"; exit 1; }
+      - name: Diag checks (aleph version, bootloader-update x2, bootupctl, failed units, digest)
+        if: always()
+        working-directory: ${{ env.OUT }}/diag
+        run: |
+          set +e; R=CHECKS.txt; : > $R; fail=0
+          chk(){ if eval "$2"; then echo "PASS  $1" | tee -a $R; else echo "FAIL  $1" | tee -a $R; fail=1; fi; }
+          chk "aleph version non-null (boot 1)" "grep -Eq '\"version\": *\"[^\"]+\"' b1-03-aleph.txt"
+          chk "aleph version non-null (boot 2)" "grep -Eq '\"version\": *\"[^\"]+\"' 00-aleph.txt"
+          chk "bootloader-update OK on boot 1" "grep -q 'exit 0' b1-02-journal-bootloader-update.txt && grep -q 'Finished bootloader-update' b1-02-journal-bootloader-update.txt && ! grep -q 'Failed to start bootloader-update' b1-02-journal-bootloader-update.txt"
+          chk "bootloader-update OK on boot 2" "grep -q 'Finished bootloader-update' 02-journal-bootloader-update-b0.txt && ! grep -q 'Failed to start bootloader-update' 02-journal-bootloader-update-b0.txt"
+          chk "bootupctl status clean (exit 0)" "head -1 04-bootupctl-status.txt | grep -q '(exit 0)'"
+          chk "failed units only nvidia-cdi-refresh" "! grep -E '^\S* *[^ ]+\.(service|path|socket|mount|timer|target) +loaded failed' 07-systemctl-failed.txt | grep -v nvidia-cdi-refresh | grep -q ."
+          chk "booted digest = ${{ inputs.expected-digest }}" "grep -A3 '●' 06-rpm-ostree-status-v.txt | grep -q 'Digest: ${{ inputs.expected-digest }}'"
+          chk "bootupctl update -vvv ran last; ESP before/after hashed" "test -s 18a-esp-tree-before-update.txt && test -s 18c-esp-tree-after-update.txt"
+          cat $R; exit $fail
       - name: Upload QA evidence (logs and screenshots only)
         if: always()
         uses: actions/upload-artifact@v4

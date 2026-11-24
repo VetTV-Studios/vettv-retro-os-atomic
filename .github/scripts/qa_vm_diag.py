@@ -12,11 +12,13 @@ import argparse, base64, json, lzma, os, re, shutil, socket, subprocess, sys, th
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--disk", required=True); ap.add_argument("--out", required=True)
-ap.add_argument("--pwfile", required=True); ap.add_argument("--script", required=True)
+ap.add_argument("--pwfile", default=None); ap.add_argument("--script", required=True)
+ap.add_argument("--unit-only", action="store_true", help="no login: diag unit via systemd.extra-unit credential on every boot from first power-on")
+ap.add_argument("--done-wait", type=int, default=1200)
 ap.add_argument("--boot-wait", type=int, default=600)
 a = ap.parse_args()
-PW = open(a.pwfile).read().strip()
-assert re.fullmatch(r"[0-9a-f]{32}", PW)
+PW = open(a.pwfile).read().strip() if a.pwfile else None
+assert a.unit_only or (PW and re.fullmatch(r"[0-9a-f]{32}", PW))
 TMP = os.environ.get("RUNNER_TEMP", "/tmp")
 SHOTS = os.path.join(a.out, "shots"); os.makedirs(SHOTS, exist_ok=True)
 DIAG = os.path.join(a.out, "diag"); os.makedirs(DIAG, exist_ok=True)
@@ -27,18 +29,16 @@ def log(m): print(f"[{time.strftime('%H:%M:%S')}] {m}", flush=True)
 
 def cred_files(tag, fallback):
     b64 = lambda s: base64.b64encode(s.encode() if isinstance(s, str) else s).decode()
-    creds = [
+    creds = [] if a.unit_only else [
         ("binary", "sysusers.extra", b64('u qadiag - "QA diag" /var/qadiag /bin/bash\nm qadiag wheel\n')),
         ("text", "passwd.plaintext-password.qadiag", PW),
         ("text", "passwd.plaintext-password.root", PW),  # fallback; sysusers likely ignores (root exists)
     ]
     if fallback:
         unit = ("[Unit]\nDescription=QA diag dump to ttyS0 (credential-only, test VM)\n"
-                "ConditionPathExists=!/etc/initrd-release\nAfter=multi-user.target\n"
-                "[Service]\nType=oneshot\nImportCredential=qadiag.script\n"
-                "ExecStartPre=/usr/bin/sleep 90\n"
-                "ExecStart=/bin/bash -c 'bash $CREDENTIALS_DIRECTORY/qadiag.script > /dev/ttyS0 2>&1'\n"
-                "TimeoutStartSec=1500\n")
+                "ConditionPathExists=!/etc/initrd-release\nAfter=bootloader-update.service\n"
+                "[Service]\nType=simple\nImportCredential=qadiag.script\n"
+                "ExecStart=/bin/bash -c 'bash $CREDENTIALS_DIRECTORY/qadiag.script > /dev/ttyS0 2>&1'\n")
         creds += [("text", "getty.ttys.serial", "ttyS0"),
                   ("binary", "qadiag.script", b64(SCRIPT)),
                   ("binary", "systemd.extra-unit.qadiag-dump.service", b64(unit)),
@@ -183,7 +183,27 @@ def run_script(vm):
     m = vm.wait(r"@@ALLDONE@@", 1500, st)
     return st, bool(m)
 
+def main_unit():
+    result = {"mode": "unit-only"}
+    vm = VM("D1", fallback=True)
+    b1 = vm.wait(r"@@BOOT1DONE@@", 300)
+    result["boot1_captured"] = bool(b1)
+    log(f"boot-1 capture: {bool(b1)} at {int(time.time()-vm.t0)} s")
+    m = vm.wait(r"@@ALLDONE@@", a.done_wait)
+    result["complete"] = bool(m)
+    names = split_sections(vm.text(), "")
+    log(f"captured {len(names)} sections, complete={bool(m)}")
+    vm.stop()
+    return result
+
 def main():
+    if a.unit_only:
+        result = main_unit()
+        json.dump(result, open(os.path.join(a.out, "diag-result.json"), "w"), indent=1)
+        for fn in os.listdir(TMP):
+            if fn.startswith("cred-"): os.remove(os.path.join(TMP, fn))
+        pngs()
+        log(json.dumps(result)); return
     result = {}
     vm = VM("D1")
     err = try_login(vm)
@@ -209,11 +229,14 @@ def main():
     for fn in os.listdir(TMP):
         if fn.startswith("cred-"): os.remove(os.path.join(TMP, fn))
     json.dump(result, open(os.path.join(a.out, "diag-result.json"), "w"), indent=1)
+    pngs()
+    log(json.dumps(result))
+
+def pngs():
     if shutil.which("pnmtopng"):
         for fn in sorted(os.listdir(SHOTS)):
             if fn.endswith(".ppm"):
                 src = os.path.join(SHOTS, fn)
                 with open(src[:-4] + ".png", "wb") as o:
                     if subprocess.run(["pnmtopng", src], stdout=o, stderr=subprocess.DEVNULL).returncode == 0: os.remove(src)
-    log(json.dumps(result))
 main()

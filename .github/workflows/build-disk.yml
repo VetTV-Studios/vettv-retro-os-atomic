@@ -15,6 +15,10 @@ on:
         options:
           - amd64
           - arm64
+      expected-digest:
+        description: "stop unless :latest resolves to this image digest (sha256:...)"
+        required: false
+        default: ""
   pull_request:
     branches:
       - main
@@ -81,6 +85,14 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Verify :latest is the expected image digest
+        if: inputs.expected-digest != ''
+        run: |
+          command -v skopeo || { sudo apt-get update -q && sudo apt-get install -yq skopeo; }
+          got=$(skopeo inspect --no-tags "docker://${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}" | jq -r .Digest)
+          echo "${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG} = $got (expected ${{ inputs.expected-digest }})"
+          [ "$got" = "${{ inputs.expected-digest }}" ] || { echo "DIGEST MISMATCH"; exit 1; }
 
       - name: Build disk images
         id: build
