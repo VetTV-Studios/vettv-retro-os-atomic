@@ -33,6 +33,21 @@ for pn in $(lsblk -nrpo NAME,FSTYPE /dev/nbd0 | awk '$2=="vfat"||$2=="ext4"{prin
   B=/tmp/qa-p; mkdir -p $B; o=ro; [ "$(lsblk -nro FSTYPE $pn)" = ext4 ] && o=ro,noload
   mount -o $o "$pn" $B && (cd $B && find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | sed "s|-|$pn files|"; find . -type f | wc -l) ; umount $B
 done
+echo "== /boot loader layout (diagnosis only)"
+BP=$(lsblk -nrpo NAME,FSTYPE /dev/nbd0 | awk '$2=="ext4"{print $1}' | head -1); B=/tmp/qa-b; mkdir -p $B
+if mount -o ro,noload "$BP" $B; then
+  ls -la $B $B/loader $B/loader/entries 2>&1
+  for l in $(find $B -maxdepth 3 -type l); do echo "symlink $l -> $(readlink $l)"; done
+  ls -la $B/loader.0 $B/loader.1 $B/loader.0/entries $B/loader.1/entries 2>&1
+  echo "-- bootupd-state.json"; cat $B/bootupd-state.json 2>&1 | head -60
+  umount $B
+fi
+ESPP=$(lsblk -nrpo NAME,FSTYPE /dev/nbd0 | awk '$2=="vfat"{print $1}' | head -1)
+if mount -o ro "$ESPP" $B; then echo "-- ESP tree"; find $B -maxdepth 4 | sort; umount $B; fi
+echo "-- bootloader-update unit"; cat "$DEP"/usr/lib/systemd/system/bootloader-update.service 2>&1
+J="${J:-$VAR/log/journal}"
+echo "-- bootloader-update journal (all boots)"; journalctl -D "$J" -u bootloader-update.service --no-pager -o short-monotonic 2>&1 | head -150
+echo "-- bootupctl/bootupd lines (all boots)"; journalctl -D "$J" --no-pager -o short-monotonic 2>&1 | grep -Ei "bootupctl|bootupd|loader/entries" | head -80
 echo "== ESP and /boot raw device hashes"
 for pn in $(lsblk -nrpo NAME,FSTYPE,PARTLABEL /dev/nbd0 | awk '$2=="vfat"||$2=="ext4"||$2=="xfs"{print $1}'); do
   echo "$(sha256sum "$pn" | cut -d' ' -f1)  $pn ($(lsblk -nro FSTYPE,PARTLABEL "$pn"))"

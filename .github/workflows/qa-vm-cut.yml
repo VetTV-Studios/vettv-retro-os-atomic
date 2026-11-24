@@ -1,6 +1,7 @@
 ---
 # QA follow-up gate (Naomi, 11-24): ESP and /boot hashes before boot 1, after
-# boot 1 and after boot 2; and power cut during vettv-grow-root, then reboot.
+# boot 1 and after boot 2; power cut during vettv-grow-root (+1 s, +0.4 s), then
+# reboot; bootloader-update diagnosis (journal, /boot/loader layout). No image patching.
 # Uploads only logs, screenshots and hash lines.
 name: QA VM cut gate
 
@@ -55,14 +56,14 @@ jobs:
           python3 .github/scripts/qa_vm_boot.py --disk "$WORK/A.qcow2" --out "$OUT" --tag A2 --wait 240
           sudo bash .github/scripts/qa_inspect.sh "$WORK/A.qcow2" "$OUT/A2-inspect.txt"
           rm -f "$WORK/A.qcow2" /tmp/ovmf-vars.fd
-      - name: "B: cut the moment grow-root starts, then reboot"
+      - name: "B: cut 1 s after Starting vettv-grow-root.service, then reboot"
         run: |
-          python3 .github/scripts/qa_vm_boot.py --disk "$WORK/B.qcow2" --out "$OUT" --tag B1 --wait 240 --kill-on 'Starting.*(vettv-grow-root|grow root)' --kill-delay 0
+          python3 .github/scripts/qa_vm_boot.py --disk "$WORK/B.qcow2" --out "$OUT" --tag B1 --wait 240 --kill-on 'Starting.*(vettv-grow-root|grow root)' --kill-delay 1.0
           sudo bash .github/scripts/qa_inspect.sh "$WORK/B.qcow2" "$OUT/B1-afterkill-inspect.txt"
           python3 .github/scripts/qa_vm_boot.py --disk "$WORK/B.qcow2" --out "$OUT" --tag B2 --wait 300
           sudo bash .github/scripts/qa_inspect.sh "$WORK/B.qcow2" "$OUT/B2-inspect.txt"
           rm -f "$WORK/B.qcow2" /tmp/ovmf-vars.fd
-      - name: "C: cut 0.4 s into grow-root (between partition write and btrfs resize), then reboot"
+      - name: "C: cut 0.4 s after Starting vettv-grow-root.service (extra point), then reboot"
         run: |
           python3 .github/scripts/qa_vm_boot.py --disk "$WORK/C.qcow2" --out "$OUT" --tag C1 --wait 240 --kill-on 'Starting.*(vettv-grow-root|grow root)' --kill-delay 0.4
           sudo bash .github/scripts/qa_inspect.sh "$WORK/C.qcow2" "$OUT/C1-afterkill-inspect.txt"
