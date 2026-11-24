@@ -93,6 +93,10 @@ jobs:
           got=$(skopeo inspect --no-tags "docker://${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG}" | jq -r .Digest)
           echo "${IMAGE_REGISTRY}/${IMAGE_NAME}:${DEFAULT_TAG} = $got (expected ${{ inputs.expected-digest }})"
           [ "$got" = "${{ inputs.expected-digest }}" ] || { echo "DIGEST MISMATCH"; exit 1; }
+          skopeo inspect --no-tags "docker://${IMAGE_REGISTRY}/${IMAGE_NAME}@${{ inputs.expected-digest }}" | jq '{Digest, Labels}'
+          v=$(skopeo inspect --no-tags "docker://${IMAGE_REGISTRY}/${IMAGE_NAME}@${{ inputs.expected-digest }}" | jq -r '.Labels["org.opencontainers.image.version"] // ""')
+          case "$v" in ""|null) echo "NO org.opencontainers.image.version LABEL"; exit 1;; esac
+          echo "version label: $v"
 
       - name: Build disk images
         id: build
