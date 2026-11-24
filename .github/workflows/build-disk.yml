@@ -28,6 +28,11 @@ env:
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"  # do not edit
   DEFAULT_TAG: "latest"
   BIB_IMAGE: "quay.io/centos-bootc/bootc-image-builder:latest"
+  # anaconda-iso only: bib looks up installer repos by os-release "ID-VERSION_ID"
+  # (vettv-retro-os-45), which it has no repo file for. We keep ID=vettv-retro-os
+  # for branding and point bib at the Fedora repos the base is built on instead.
+  # Keep FEDORA_MAJOR in sync with the Bazzite base (rpm -E %fedora).
+  FEDORA_MAJOR: "45"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref || github.run_id }}
@@ -87,7 +92,8 @@ jobs:
           chown: ${{ env.USER_UID }}:${{ env.USER_GID }}
           types: ${{ matrix.disk-type }}
           rootfs: btrfs
-          additional-args: --use-librepo=True
+          additional-args: >-
+            --use-librepo=True${{ matrix.disk-type == 'anaconda-iso' && format(' --force-repo=https://dl.fedoraproject.org/pub/fedora/linux/releases/{0}/Everything/{1}/os/ --force-repo=https://dl.fedoraproject.org/pub/fedora/linux/updates/{0}/Everything/{1}/', env.FEDORA_MAJOR, inputs.platform == 'arm64' && 'aarch64' || 'x86_64') || '' }}
 
       - name: Compress raw disk and write sha256 (USB flashing)
         if: matrix.disk-type == 'raw'
@@ -104,6 +110,7 @@ jobs:
         if: inputs.upload-to-s3 != true && github.event_name != 'pull_request'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
+          name: vettv-retro-os-${{ matrix.disk-type }}
           path: ${{ steps.build.outputs.output-directory }}
           if-no-files-found: error
           retention-days: 0
