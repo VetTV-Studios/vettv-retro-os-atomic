@@ -1,13 +1,16 @@
 #!/bin/bash
-# VetTV Retro OS image build (base: ghcr.io/ublue-os/kinoite-main:44, KDE Plasma).
+# VetTV Retro OS image build (base: ghcr.io/ublue-os/bazzite-nvidia-open stable, pinned by digest in Containerfile; KDE Plasma).
 set -ouex pipefail
 
 # VetTV overlay: art, SDDM/lock-screen/wallpaper defaults, first-boot services.
 cp -avf "/ctx/system_files"/. /
 
 ### Branding: drop Fedora logos/marks for neutral generic-logos, then VetTV art on top.
-dnf5 -y swap fedora-logos generic-logos || dnf5 -y install generic-logos
-for f in fedora-logos-httpd fedora-logos-classic; do dnf5 -y remove "$f" || true; done
+# Bazzite may ship its own logo package instead of fedora-logos; only swap what is installed.
+if rpm -q fedora-logos >/dev/null 2>&1; then
+  dnf5 -y swap fedora-logos generic-logos || echo "WARN: fedora-logos swap skipped"
+fi
+for f in fedora-logos-httpd fedora-logos-classic; do rpm -q "$f" >/dev/null 2>&1 && dnf5 -y remove "$f" || true; done
 
 ### Packages
 dnf5 -y install \
@@ -21,7 +24,7 @@ dnf5 -y install \
 FEDORA_VER="$(rpm -E %fedora)"
 cat > /usr/lib/os-release <<EOF
 NAME="VetTV Retro OS"
-PRETTY_NAME="VetTV Retro OS ${FEDORA_VER} (Universal Blue / Fedora Atomic base)"
+PRETTY_NAME="VetTV Retro OS ${FEDORA_VER} (Bazzite / Universal Blue base)"
 ID=vettv-retro-os
 ID_LIKE="fedora"
 VERSION_ID="${FEDORA_VER}"

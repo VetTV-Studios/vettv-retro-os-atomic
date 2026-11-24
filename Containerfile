@@ -4,7 +4,8 @@ COPY build_files /
 COPY system_files /system_files
 
 # Base Image
-FROM ghcr.io/ublue-os/kinoite-main:44
+# Bazzite NVIDIA Open stable 45.20261123.1 (Mesa 26.3.1, NVIDIA 620.73.04, kernel 7.3.5), pinned by digest (Faye/Vet 11-24)
+FROM ghcr.io/ublue-os/bazzite-nvidia-open@sha256:f87d433eeb926d21cf43bf2b032706628e33f9f5538cfe41a854c1f58de1b1f6
 ## Other possible base images include:
 # FROM ghcr.io/ublue-os/bazzite:testing
 # FROM ghcr.io/ublue-os/aurora:stable
