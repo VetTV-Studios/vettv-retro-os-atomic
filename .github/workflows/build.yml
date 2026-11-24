@@ -15,6 +15,8 @@ on:
 
 env:
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"  # do not edit
+  # Our image version = <base org.opencontainers.image.version>-vettv.<VETTV_REV>
+  VETTV_REV: "1"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref || github.run_id }}-${{ inputs.brand_name}}-${{ inputs.stream_name }}
@@ -74,6 +76,11 @@ jobs:
             ${IMAGE_NAME} \
             ${DEFAULT_TAG}
 
+      - name: Save pre-rechunk labels
+        run: |
+          podman image inspect "localhost/${IMAGE_NAME}:${DEFAULT_TAG}" --format '{{json .Labels}}' > /tmp/pre-labels.json
+          cat /tmp/pre-labels.json
+
       # This is optional, this provides smaller delta updates
       - name: Rechunk with rpm-ostree
         id: rechunk
@@ -81,6 +88,13 @@ jobs:
           just ostree-rechunk \
             ${IMAGE_NAME} \
             ${DEFAULT_TAG}
+
+      # build-chunked-oci drops all labels; without org.opencontainers.image.version
+      # bootc writes a null aleph version and bootloader-update fails (bootupd#1166)
+      - name: Restore labels (label-only, layers unchanged)
+        run: |
+          command -v skopeo || { sudo apt-get update -q && sudo apt-get install -yq skopeo; }
+          bash .github/scripts/restore_labels.sh "localhost/${IMAGE_NAME}:${DEFAULT_TAG}" /tmp/pre-labels.json
 
       # If you are feeling adventurous, use the new distro agnostic rechunker
       # https://github.com/coreos/chunkah
