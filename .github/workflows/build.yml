@@ -16,7 +16,7 @@ on:
 env:
   IMAGE_REGISTRY: "ghcr.io/${{ github.repository_owner }}"  # do not edit
   # Our image version = <base org.opencontainers.image.version>-vettv.<VETTV_REV>
-  VETTV_REV: "4"
+  VETTV_REV: "5"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref || github.run_id }}-${{ inputs.brand_name}}-${{ inputs.stream_name }}

@@ -22,7 +22,7 @@ got=$(flatpak info --system --show-commit $RT)
 [ "$got" = "$RTC" ] || { echo "vettv-dosbox-x: runtime commit $got != pinned $RTC" >&2; exit 1; }
 # Game folders: grant read-only access to the h2h game mount (QA must verify sandbox access).
 flatpak override --system --filesystem=/srv/games:ro --filesystem=~/games:ro \
-  --filesystem=/opt/vettv-h2h:ro --filesystem=xdg-state/vettv-h2h:create $APP
+  --filesystem=/opt/vettv-h2h:ro --filesystem=~/.local/state/vettv-h2h:create $APP
 # Shim so vetvdm-h2h.sh's default VETTV_DOSBOX path works unchanged on both distros.
 if [ ! -x /opt/dosbox-x/bin/dosbox-x ]; then
   mkdir -p /opt/dosbox-x/bin
