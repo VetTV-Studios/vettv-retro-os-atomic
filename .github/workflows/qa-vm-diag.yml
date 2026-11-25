@@ -57,8 +57,10 @@ jobs:
           [ "$got" = "${{ inputs.raw-xz-sha256 }}" ] || { echo "RAW XZ HASH MISMATCH"; exit 1; }
           xz -dc -T0 "$XZ" | cp --sparse=always /dev/stdin disk.raw; rm -f "$XZ"
           got=$(sha256sum disk.raw | cut -d' ' -f1)
+          want="${{ inputs.raw-sha256 }}"; [ "$want" = record ] && want=$got   # "record": xz hash above is the gate
+          echo "$want" > "$WORK/raw.expected"
           echo "$got  disk.raw before boot (expected ${{ inputs.raw-sha256 }})" | tee -a "$OUT/hashes.txt"
-          [ "$got" = "${{ inputs.raw-sha256 }}" ] || { echo "RAW HASH MISMATCH"; exit 1; }
+          [ "$got" = "$want" ] || { echo "RAW HASH MISMATCH"; exit 1; }
           chmod a-w disk.raw
           qemu-img create -q -f qcow2 -b "$WORK/disk.raw" -F raw D.qcow2 64G
           qemu-img info D.qcow2 | tee -a "$OUT/hashes.txt"
@@ -75,10 +77,11 @@ jobs:
           sudo chown -R "$USER" "$OUT"
           rm -f "$RUNNER_TEMP"/cred-*
           got=$(sha256sum "$WORK/disk.raw" | cut -d' ' -f1)
-          echo "$got  disk.raw after run (expected ${{ inputs.raw-sha256 }})" | tee -a "$OUT/hashes.txt"
+          want=$(cat "$WORK/raw.expected")
+          echo "$got  disk.raw after run (expected $want)" | tee -a "$OUT/hashes.txt"
           rm -f "$WORK/D.qcow2" "$WORK/disk.raw"
           find "$OUT" -type f | sort; du -sh "$OUT"
-          [ "$got" = "${{ inputs.raw-sha256 }}" ] || { echo "RAW CHANGED"; exit 1; }
+          [ "$got" = "$want" ] || { echo "RAW CHANGED"; exit 1; }
       - name: Diag checks (aleph version, bootloader-update x2, bootupctl, failed units, digest)
         if: always()
         working-directory: ${{ env.OUT }}/diag
