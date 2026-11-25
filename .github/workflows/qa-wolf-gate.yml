@@ -92,9 +92,24 @@ jobs:
       - name: Fetch shareware zip, verify sha256 + per-file reference hashes
         run: |
           set -euo pipefail
-          curl -fsSL -A "Mozilla/5.0" -o "$RUN/dl/1wolf14.zip" "$ZIP_URL"
+          # run 45695448030: plain curl got HTTP 403 from dosgames.com on the runner.
+          # Send normal browser headers + the game page as Referer, retry, and record status codes.
+          UA="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36"
+          ok=0
+          for u in "$ZIP_URL" "${ZIP_URL/:\/\/dosgames.com/://www.dosgames.com}"; do
+            for i in 1 2 3; do
+              code=$(curl -sSL -A "$UA" -e "https://www.dosgames.com/game/wolfenstein-3d/" \
+                -H "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8" \
+                -H "Accept-Language: en-US,en;q=0.9" --compressed -D "$OUT/fetch-headers.txt" \
+                -o "$RUN/dl/1wolf14.zip" -w "%{http_code} %{url_effective}" "$u" || true)
+              echo "try $u #$i -> $code" | tee -a "$OUT/source.txt"
+              case "$code" in 200*) ok=1; break 2;; esac
+              sleep 5
+            done
+          done
+          [ $ok = 1 ] || { echo "::error::could not fetch logged URL (see source.txt)"; exit 1; }
           got=$(sha256sum "$RUN/dl/1wolf14.zip" | cut -d' ' -f1)
-          echo "zip_url=$ZIP_URL" | tee "$OUT/source.txt"
+          echo "zip_url=$ZIP_URL" | tee -a "$OUT/source.txt"
           echo "zip_sha256=$got (expected $ZIP_SHA)" | tee -a "$OUT/source.txt"
           [ "$got" = "$ZIP_SHA" ] || { echo "::error::zip sha256 mismatch"; exit 1; }
           unzip -q -o "$RUN/dl/1wolf14.zip" -d "$RUN/dl/z"
