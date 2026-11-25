@@ -204,9 +204,21 @@ jobs:
           key Return; sleep 5;  shot pre-02-after-signon
           key Return; sleep 4;  shot pre-03-title-or-menu
           key Return; sleep 3;  shot pre-04-menu
-          # menu cursor starts on New Game
+          # run 45710707997: on a first run (no CONFIG.WL1) the shareware menu cursor starts on
+          # "Read This!". Up x5 (Save Game is disabled and skipped) puts it on "New Game".
+          for i in 1 2 3 4 5; do key Up; sleep 0.4; done
+          sleep 1; shot pre-04b-menu-newgame
+          ocr() { convert "$OUT/frames/$1.png" -resize 200% -colorspace Gray - | tesseract stdin stdout 2>/dev/null | tr '\n' ' '; }
+          echo "ocr pre-04b: $(ocr pre-04b-menu-newgame | cut -c1-160)" >> "$OUT/frames/timeline.txt"
           key Return; sleep 3;  shot pre-05-episode
-          key Return; sleep 3;  shot pre-06-difficulty
+          t5=$(ocr pre-05-episode); echo "ocr pre-05: $(echo "$t5" | cut -c1-160)" >> "$OUT/frames/timeline.txt"
+          if echo "$t5" | grep -qi "tough"; then
+            echo "no episode screen; already on difficulty" >> "$OUT/frames/timeline.txt"
+            cp "$OUT/frames/pre-05-episode.png" "$OUT/frames/pre-06-difficulty.png"
+          else
+            key Return; sleep 3;  shot pre-06-difficulty
+          fi
+          echo "ocr pre-06: $(ocr pre-06-difficulty | cut -c1-160)" >> "$OUT/frames/timeline.txt"
           key Up;     sleep 1;  shot pre-07-difficulty-daddy
           key Return; sleep 6
           for t in 00 10 20 30 40 50 60; do
@@ -229,11 +241,14 @@ jobs:
           for f in frames/floor1-t*.png; do
             txt=$(convert "$f" -resize 200% -colorspace Gray - | tesseract stdin stdout 2>/dev/null | tr '\n' ' ')
             flag=ok
-            echo "$txt" | grep -Eqi 'C:\\>|C:\\ *>|Z:\\>|press a key|wolfenstein 3-?d|new game|how tough|get psyched' && flag=SUSPECT && bad=1
+            echo "$txt" | grep -Eqi 'C:\\>|C:\\ *>|Z:\\>|press a key|wolfenstein 3-?d|new game|how tough|get psyched|table of contents|read this|quick command|episode' && flag=SUSPECT && bad=1
             echo "$f ocr=$flag text=[$(echo "$txt" | cut -c1-120)]" | tee -a "$r"
           done
           for f in frames/floor1-t*.png; do echo "$f mean=$(convert "$f" -format '%[fx:mean]' info:)"; done | tee -a "$r"
           sha256sum frames/*.png > frames/SHA256SUMS.txt
+          uniq_floor=$(sha256sum frames/floor1-t*.png | cut -d' ' -f1 | sort -u | wc -l)
+          echo "distinct_floor1_frames=$uniq_floor of 7 (1 = static screen, not live gameplay)" | tee -a "$r"
+          [ "$uniq_floor" -gt 1 ] || bad=1
           if [ "$passes" = 1 ] && [ $bad = 0 ] && ! grep -q "F000:FFF0" dosbox-x.log 2>/dev/null && grep -q "alive_at_t60=yes" frames/timeline.txt; then
             echo "AUTO_RESULT=no-reset-detected (QA visual review required)" | tee -a "$r"
           else
