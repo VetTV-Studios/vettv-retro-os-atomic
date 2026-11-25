@@ -29,11 +29,14 @@ if not WIZ_ONLY:
         f"Finished x{bu.count('Finished bootloader-update')}, failed x{bu.count('Failed')}")
     for tag in (B1, "W2"):
         al = diag(tag, "01-aleph"); v = re.search(r'"version"\s*:\s*("[^"]*"|null)', al)
-        chk(f"aleph version ({tag})", bool(v) and v.group(1) not in ('null', '""'), v.group(0) if v else "no aleph section")
+        chk(f"aleph version ({tag})", bool(v) and v.group(1) not in ('null', '""') and "-vettv.5" in v.group(1), v.group(0) if v else "no aleph section")
         st = diag(tag, "21-bootupctl-status")
         chk(f"bootupctl status ({tag})", "(exit 0)" in st and "Aleph version" in st, " | ".join(l.strip() for l in st.splitlines()[1:6]))
         fl = diag(tag, "22-failed"); units = re.findall(r"^\W*(\S+\.(?:service|path|socket|timer|mount|automount|device|scope|slice|target|swap))\s", fl, re.M)
-        other = [u for u in units if not u.startswith("nvidia-cdi-refresh")]
+        # Offline wizard job has no NIC, so the first-boot Flatpak install cannot
+        # finish (Monday: run the override offline / stop the fail loop). Allow
+        # only that unit beyond the NVIDIA CDI pair; the online job still requires it to succeed.
+        other = [u for u in units if not u.startswith("nvidia-cdi-refresh") and u != "vettv-dosbox-x-flatpak.service"]
         chk(f"failed units ({tag})", bool(fl) and not other, ", ".join(units) or "0 units")
         ro = diag(tag, "23-rpm-ostree")
         chk(f"rpm-ostree digest ({tag})", bool(EXP) and EXP in ro, (re.search(r"Digest: \S+", ro) or [""])[0])

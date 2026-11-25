@@ -28,4 +28,15 @@ sec o${B}-08-image bash -c 'rpm-ostree status --booted | head -8; cat /sysroot/.
 sec o${B}-09-flatpak-app-commit flatpak info --system --show-commit com.dosbox_x.DOSBox-X
 sec o${B}-10-flatpak-runtime-commit flatpak info --system --show-commit org.freedesktop.Platform//26.08
 sec o${B}-11-flatpak-mask flatpak mask --system
+sec o${B}-12-flatpak-override flatpak override --system --show com.dosbox_x.DOSBox-X
+sec o${B}-13-done-stamp bash -c 'if [ -e /var/lib/vettv/dosbox-x-flatpak.done ]; then echo "done-stamp: present"; ls -l /var/lib/vettv/dosbox-x-flatpak.done; echo "-- contents --"; cat /var/lib/vettv/dosbox-x-flatpak.done; else echo "done-stamp: MISSING"; ls -la /var/lib/vettv/ 2>&1; fi'
+sec o${B}-14-failed-units systemctl --failed --no-pager
+sec o${B}-15-flatpak-version bash -c 'export SDL_VIDEODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 QT_QPA_PLATFORM=offscreen DISPLAY= WAYLAND_DISPLAY=; timeout 60 flatpak --system run com.dosbox_x.DOSBox-X --version'
 printf '@@ONLINE-DONE boot=%s@@\n' "$B" | tty
+# After a successful first install, reboot once so boot 2 can prove the service
+# is skipped by ConditionPathExists. A first-boot auto-reboot may already be
+# coming; a second request is harmless.
+if [ "$B" = 1 ] && [ -e /var/lib/vettv/dosbox-x-flatpak.done ]; then
+  sleep 2
+  systemctl reboot || /sbin/reboot
+fi
