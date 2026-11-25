@@ -1,0 +1,242 @@
+---
+# QA Wolf gate (Linux QA, Naomi): Wolfenstein 3D SHAREWARE 1.4, Floor 1, 60 s,
+# under the pinned DOSBox-X Flatpak (exact app + runtime commits) on a plain
+# ubuntu runner (image-independent). Rules (TESTSETS.md, Wolf gate):
+# - source URL + sha256 logged in lead/approvals.md and verified here at run time
+# - records app commit + runtime commit + runner setup
+# - frame every 10 s over 60 s on Floor 1 (7 frames) + DOSBox-X log as artifacts
+# - no reset to title / DOS prompt in any frame; QA reviews frames before a pass
+# Game files live only in $GAME on the runner during the job. They are never
+# committed, never uploaded as artifacts, never put on any image.
+name: QA Wolf gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      app-commit:
+        description: "com.dosbox_x.DOSBox-X Flathub commit"
+        required: true
+        default: "a63863de89d3839f64ca039d5425f319d6fd925e8b9e55d09c20f76a4e3495ff"
+      runtime-commit:
+        description: "org.freedesktop.Platform//26.08 commit"
+        required: true
+        default: "df26daaf9d07610b4a72cc4585566194051275ac68396597b06474396f66427c"
+      zip-url:
+        description: "Wolf3D shareware 1.4 URL (as logged in lead/approvals.md)"
+        required: true
+        default: "https://dosgames.com/files/1wolf14.zip"
+      zip-sha256:
+        description: "expected sha256 of the zip (as logged in lead/approvals.md)"
+        required: true
+        default: "c3d355ed9f887a94239140070b15d4042ec68a4a456171c2853edc04727b1171"
+
+permissions:
+  contents: read
+
+jobs:
+  wolf-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      APP: com.dosbox_x.DOSBox-X
+      RUNTIME: org.freedesktop.Platform//26.08
+      RT_REF: runtime/org.freedesktop.Platform/x86_64/26.08
+      APP_REF: app/com.dosbox_x.DOSBox-X/x86_64/stable
+      APP_COMMIT: ${{ inputs.app-commit }}
+      RT_COMMIT: ${{ inputs.runtime-commit }}
+      ZIP_URL: ${{ inputs.zip-url }}
+      ZIP_SHA: ${{ inputs.zip-sha256 }}
+      RUN: /home/runner/wolfrun
+      GAME: /home/runner/wolfrun/game     # NEVER uploaded
+      OUT: /home/runner/wolfrun/out       # the only uploaded dir
+      DISPLAY: ":99"
+    steps:
+      - name: Prepare dirs + runner record
+        run: |
+          mkdir -p "$GAME" "$OUT/frames" "$RUN/dl"
+          {
+            echo "run_id=$GITHUB_RUN_ID attempt=$GITHUB_RUN_ATTEMPT sha=$GITHUB_SHA"
+            echo "runner_os=$ImageOS runner_image_version=$ImageVersion"
+            uname -a; lsb_release -ds; nproc; free -m | sed -n 2p
+          } | tee "$OUT/setup.txt"
+
+      - name: Install flatpak + xvfb + xdotool + imagemagick + tesseract
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q flatpak xvfb xdotool imagemagick tesseract-ocr dbus-x11 unzip
+          dpkg-query -W flatpak xvfb xdotool imagemagick tesseract-ocr | tee -a "$OUT/setup.txt"
+
+      - name: Install pinned runtime + app (exact commits) and verify
+        run: |
+          set -euo pipefail
+          sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y --noninteractive flathub "$RT_REF" "$APP_REF"
+          sudo flatpak update -y --noninteractive --commit="$RT_COMMIT" "$RT_REF"
+          sudo flatpak update -y --noninteractive --commit="$APP_COMMIT" "$APP_REF"
+          sudo flatpak mask "$APP" || true
+          sudo flatpak mask org.freedesktop.Platform || true
+          got_app=$(flatpak info --show-commit "$APP")
+          got_rt=$(flatpak info --show-commit "$RUNTIME")
+          app_rt=$(flatpak info --show-runtime "$APP")
+          {
+            echo "app=$APP commit=$got_app (expected $APP_COMMIT)"
+            echo "runtime=$RUNTIME commit=$got_rt (expected $RT_COMMIT)"
+            echo "app_runtime_ref=$app_rt"
+            flatpak info "$APP" | sed -n '1,20p'
+          } | tee "$OUT/commits.txt"
+          [ "$got_app" = "$APP_COMMIT" ] || { echo "::error::app commit mismatch"; exit 1; }
+          [ "$got_rt" = "$RT_COMMIT" ] || { echo "::error::runtime commit mismatch"; exit 1; }
+          case "$app_rt" in org.freedesktop.Platform/x86_64/26.08) ;; *) echo "::error::app uses runtime $app_rt"; exit 1;; esac
+          echo "COMMITS_VERIFIED" >> "$OUT/commits.txt"
+
+      - name: Fetch shareware zip, verify sha256 + per-file reference hashes
+        run: |
+          set -euo pipefail
+          curl -fsSL -A "Mozilla/5.0" -o "$RUN/dl/1wolf14.zip" "$ZIP_URL"
+          got=$(sha256sum "$RUN/dl/1wolf14.zip" | cut -d' ' -f1)
+          echo "zip_url=$ZIP_URL" | tee "$OUT/source.txt"
+          echo "zip_sha256=$got (expected $ZIP_SHA)" | tee -a "$OUT/source.txt"
+          [ "$got" = "$ZIP_SHA" ] || { echo "::error::zip sha256 mismatch"; exit 1; }
+          unzip -q -o "$RUN/dl/1wolf14.zip" -d "$RUN/dl/z"
+          unzip -q -o "$RUN/dl/z/WOLF.1" -d "$GAME"
+          # reference: lanes/dosbox-x/gate-run8-prep/wolf3d-sw14-reference.sha256
+          cat > "$RUN/ref.sha256" <<'REF'
+          3c9df119dc85ee49294275374652f22c691c4e6ea017dbba6b6d6d960a84891f  WOLF3D.EXE
+          39351624ae6f8eef4b873e060c1a6f3e5ee7e81c4939c485275a89b145336338  AUDIOHED.WL1
+          1e2c9ae30398a14c61a4ddd39aabaa0dbcc984cc4924a3e51df75574c259cfb9  AUDIOT.WL1
+          a6a6654b342f2c027bcb22bfce0a41f9fc0063b775e9e4da0c771970e53e11aa  GAMEMAPS.WL1
+          3458f661c9b875bca99ea22a7267771fad8f2a33c699ea732cf7c3322909bf8c  MAPHEAD.WL1
+          59878fec65f033b00dbb1240317d1793f5858213dc8013b4d68f9ac8b45b0c80  VGADICT.WL1
+          d5176f843c53415132db199c19f38591eaf3cedd35a4f7eb2698c1865d83030d  VGAGRAPH.WL1
+          f4cc800dc8444373092d4eaa5d6ab59d63d23a510a9d38b73ca9b3dbb700d18b  VGAHEAD.WL1
+          698f217257e2cbb951a4d110ba09140291f38d0121b3784d1d6be59c03a6b47b  VSWAP.WL1
+          REF
+          cd "$GAME"
+          sed 's/^ *//' "$RUN/ref.sha256" | sha256sum -c - | tee "$OUT/game-hashes-check.txt"
+          rm -rf "$RUN/dl/z"
+
+      - name: Write DOSBox-X conf (Priya w12-0831 profile, Linux paths)
+        run: |
+          cat > "$OUT/wolf-gate.conf" <<EOC
+          [sdl]
+          autolock=false
+          fullscreen=false
+          output=surface
+          windowresolution=original
+
+          [dosbox]
+          hostkey=mapper
+          machine=svga_s3
+          memsize=16
+          quit warning=false
+
+          [cpu]
+          always report triple fault=true
+          core=normal
+          cputype=auto
+          cycles=fixed 20000
+          reset on triple fault=false
+
+          [dos]
+          ems=true
+          xms=true
+
+          [midi]
+          mpu401=none
+
+          [sblaster]
+          sbtype=sb16
+          sbbase=220
+          irq=7
+          dma=1
+          hdma=5
+          oplmode=opl2
+
+          [log]
+          misc=debug
+          logfile=$OUT/dosbox-x.log
+
+          [autoexec]
+          mount C "$GAME"
+          mount V "$OUT"
+          C:
+          echo pass>>V:\VETPASS.TXT
+          if exist V:\VETRUN.TXT exit
+          echo run>V:\VETRUN.TXT
+          wolf3d.exe noss
+          config -get errorlevel >V:\ERRORLVL.TXT
+          exit
+          EOC
+          sed -i 's/^ *//' "$OUT/wolf-gate.conf"
+          cat "$OUT/wolf-gate.conf"
+
+      - name: Run Wolf3D under Xvfb, drive to Floor 1, capture frames
+        run: |
+          set -uo pipefail
+          Xvfb :99 -screen 0 1024x768x24 -nolisten tcp &
+          sleep 3
+          shot() { import -display :99 -window root "$OUT/frames/$1.png"; echo "$(date -u +%T) $1" >> "$OUT/frames/timeline.txt"; }
+          key() { xdotool keydown "$1"; sleep 0.25; xdotool keyup "$1"; echo "$(date -u +%T) key $1" >> "$OUT/frames/timeline.txt"; }
+          dbus-run-session -- flatpak run --env=SDL_AUDIODRIVER=dummy \
+            --filesystem="$RUN" "$APP" -conf "$OUT/wolf-gate.conf" \
+            > "$OUT/dosbox-x-stdout.log" 2>&1 &
+          DPID=$!
+          WID=$(timeout 60 xdotool search --sync --onlyvisible --name "DOSBox" | head -1)
+          echo "window=$WID" | tee -a "$OUT/frames/timeline.txt"
+          xdotool windowfocus --sync "$WID" || true
+          xdotool mousemove --window "$WID" 100 100 || true
+          sleep 8;  shot pre-01-signon
+          key Return; sleep 5;  shot pre-02-after-signon
+          key Return; sleep 4;  shot pre-03-title-or-menu
+          key Return; sleep 3;  shot pre-04-menu
+          # menu cursor starts on New Game
+          key Return; sleep 3;  shot pre-05-episode
+          key Return; sleep 3;  shot pre-06-difficulty
+          key Up;     sleep 1;  shot pre-07-difficulty-daddy
+          key Return; sleep 6
+          for t in 00 10 20 30 40 50 60; do
+            shot "floor1-t${t}s"
+            [ "$t" = 60 ] || sleep 10
+          done
+          if kill -0 "$DPID" 2>/dev/null; then echo "dosbox_alive_at_t60=yes" >> "$OUT/frames/timeline.txt"; else echo "dosbox_alive_at_t60=NO" >> "$OUT/frames/timeline.txt"; fi
+          pkill -f dosbox-x || true; sleep 2; pkill Xvfb || true
+          cat "$OUT/frames/timeline.txt"
+
+      - name: Automated reset check (advisory; final call is QA visual)
+        run: |
+          set -u
+          cd "$OUT"
+          r="$OUT/reset-check.txt"
+          passes=$(grep -c pass VETPASS.TXT 2>/dev/null); passes=${passes:-0}
+          echo "autoexec_runs=$passes (1 = no reset)" | tee "$r"
+          if grep -n "F000:FFF0" dosbox-x.log >/dev/null 2>&1; then echo "log_reset_vector=FOUND" | tee -a "$r"; grep -n "F000:FFF0" dosbox-x.log | head | tee -a "$r"; else echo "log_reset_vector=none" | tee -a "$r"; fi
+          bad=0
+          for f in frames/floor1-t*.png; do
+            txt=$(convert "$f" -resize 200% -colorspace Gray - | tesseract stdin stdout 2>/dev/null | tr '\n' ' ')
+            flag=ok
+            echo "$txt" | grep -Eqi 'C:\\>|C:\\ *>|Z:\\>|press a key|wolfenstein 3-?d|new game|how tough|get psyched' && flag=SUSPECT && bad=1
+            echo "$f ocr=$flag text=[$(echo "$txt" | cut -c1-120)]" | tee -a "$r"
+          done
+          for f in frames/floor1-t*.png; do echo "$f mean=$(convert "$f" -format '%[fx:mean]' info:)"; done | tee -a "$r"
+          sha256sum frames/*.png > frames/SHA256SUMS.txt
+          if [ "$passes" = 1 ] && [ $bad = 0 ] && ! grep -q "F000:FFF0" dosbox-x.log 2>/dev/null && grep -q "alive_at_t60=yes" frames/timeline.txt; then
+            echo "AUTO_RESULT=no-reset-detected (QA visual review required)" | tee -a "$r"
+          else
+            echo "AUTO_RESULT=SUSPECT (see above; QA visual review required)" | tee -a "$r"
+          fi
+
+      - name: Guard - no game files in artifact dir
+        if: always()
+        run: |
+          cd "$OUT" || exit 0
+          rm -f ./*.WL1 ./*.EXE ./*.wl1 ./*.exe 2>/dev/null || true
+          if find . -iname '*.wl1' -o -iname '*.exe' -o -iname '*.zip' -o -iname 'WOLF.1' | grep .; then echo "::error::game file in OUT"; exit 1; fi
+          ls -laR "$OUT"
+
+      - name: Upload artifacts (frames, logs, conf, commits, hashes only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wolf-gate-${{ github.run_id }}
+          path: /home/runner/wolfrun/out
+          retention-days: 90
