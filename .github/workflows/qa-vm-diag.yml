@@ -99,7 +99,7 @@ jobs:
           cat $R; exit $fail
       - name: Upload QA evidence (logs and screenshots only)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: qa-vm-diag-${{ github.run_id }}
           path: qa-out/
