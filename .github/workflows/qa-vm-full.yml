@@ -1,0 +1,170 @@
+---
+# Combined QA gate (Faye/Naomi 11-25, one dispatch): first-user wizard checks
+# + full VM gate on one disk, and both power cuts in a parallel job of the
+# same run. Offline QEMU/KVM, OVMF. A probe unit is passed only as SMBIOS
+# credentials (test VM only). The wizard test password is generated inside
+# the job and never printed or stored. Uploads only logs, screenshots, hashes.
+name: QA VM full gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      source-run: {description: "build-disk run id", required: true}
+      raw-artifact: {description: "raw artifact id", required: true}
+      raw-xz-sha256: {description: "expected sha256 of disk.raw.xz", required: true}
+      qcow2-artifact: {description: "qcow2 artifact id (hashed only)", required: true}
+      expected-digest: {description: "image digest the raw was built from (sha256:...)", required: true}
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  OUT: ${{ github.workspace }}/qa-out
+  WORK: /mnt/qa
+
+jobs:
+  wizard-gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prep runner, KVM, QEMU, OCR
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup "$AGENT_TOOLSDIRECTORY" || true
+          sudo mkdir -p "$WORK" && sudo chown "$USER" "$WORK"; mkdir -p "$OUT/shots"
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          sudo apt-get update -q && sudo apt-get install -yq qemu-system-x86 qemu-utils ovmf gdisk btrfs-progs ostree netpbm tesseract-ocr >/dev/null
+          ls -l /dev/kvm; qemu-system-x86_64 --version | head -1 | tee "$OUT/qemu-version.txt"; tesseract --version 2>&1 | head -1
+      - name: Fetch raw, verify sha256 (stop on mismatch)
+        working-directory: ${{ env.WORK }}
+        run: |
+          gh api "repos/${{ github.repository }}/actions/artifacts/${{ inputs.raw-artifact }}" --jq '[.id,.name,.digest,.workflow_run.id]|@tsv' | tee "$OUT/raw-artifact-meta.txt"
+          awk -F'\t' -v r="${{ inputs.source-run }}" '$4==r{f=1} END{exit !f}' "$OUT/raw-artifact-meta.txt" || { echo "artifact not from source run"; exit 1; }
+          gh api "repos/${{ github.repository }}/actions/artifacts/${{ inputs.raw-artifact }}/zip" > raw.zip
+          unzip -q raw.zip && rm raw.zip
+          XZ=$(find . -name disk.raw.xz | head -1); got=$(sha256sum "$XZ" | cut -d' ' -f1)
+          echo "$got  disk.raw.xz (expected ${{ inputs.raw-xz-sha256 }})" | tee "$OUT/hashes.txt"
+          [ "$got" = "${{ inputs.raw-xz-sha256 }}" ] || { echo "RAW HASH MISMATCH"; exit 1; }
+          find . -name 'SHA256SUMS*' -exec cat {} \; | tee -a "$OUT/hashes.txt"
+          xz -dc -T0 "$XZ" | cp --sparse=always /dev/stdin disk.raw; rm -f "$XZ"
+          sha256sum disk.raw | tee -a "$OUT/hashes.txt"
+          echo "expected image: ${{ inputs.expected-digest }}" | tee -a "$OUT/hashes.txt"
+      - name: Hash qcow2 artifact (not booted)
+        working-directory: ${{ env.WORK }}
+        run: |
+          gh api "repos/${{ github.repository }}/actions/artifacts/${{ inputs.qcow2-artifact }}" --jq '[.id,.name,.digest,.workflow_run.id]|@tsv' | tee -a "$OUT/hashes.txt"
+          gh api "repos/${{ github.repository }}/actions/artifacts/${{ inputs.qcow2-artifact }}/zip" > q.zip
+          dg=$(gh api "repos/${{ github.repository }}/actions/artifacts/${{ inputs.qcow2-artifact }}" --jq .digest)
+          got=$(sha256sum q.zip | cut -d' ' -f1); echo "$got  qcow2 artifact zip (artifact digest $dg)" | tee -a "$OUT/hashes.txt"
+          [ "sha256:$got" = "$dg" ] || { echo "QCOW2 ZIP != ARTIFACT DIGEST"; exit 1; }
+          unzip -q q.zip && rm q.zip; find . -name '*.qcow2' -exec sha256sum {} \; | tee -a "$OUT/hashes.txt"; find . -name '*.qcow2' -delete
+      - name: "W0: ESP and /boot before first boot"
+        run: |
+          qemu-img create -q -f qcow2 -b "$WORK/disk.raw" -F raw "$WORK/W.qcow2" 64G
+          sudo bash .github/scripts/qa_inspect.sh "$WORK/W.qcow2" "$OUT/W0-inspect.txt"
+      - name: "W1: boot 1, wizard screenshot, drive wizard by QMP (attempt 1: keys)"
+        id: w1
+        continue-on-error: true
+        run: |
+          echo W1 > "$OUT/BOOT1_TAG"
+          python3 .github/scripts/qa_vm_wizard.py --disk "$WORK/W.qcow2" --out "$OUT" --tag W1 --phase boot1 --strategy keys \
+            --script .github/scripts/qa_wizard_guest.sh --vars "$RUNNER_TEMP/W-vars.fd"
+      - name: "W1b: attempt 2 on a fresh overlay (OCR clicks into fields), only if attempt 1 failed to drive"
+        if: steps.w1.outcome == 'failure'
+        run: |
+          if grep -q '"wizard_up_s": null' "$OUT/W1-result.json" 2>/dev/null; then echo "wizard never came up in attempt 1; no retry"; exit 0; fi
+          sudo bash .github/scripts/qa_inspect.sh "$WORK/W.qcow2" "$OUT/W1-attempt1-inspect.txt"
+          rm -f "$WORK/W.qcow2" "$RUNNER_TEMP/W-vars.fd"
+          qemu-img create -q -f qcow2 -b "$WORK/disk.raw" -F raw "$WORK/W.qcow2" 64G
+          echo W1b > "$OUT/BOOT1_TAG"
+          python3 .github/scripts/qa_vm_wizard.py --disk "$WORK/W.qcow2" --out "$OUT" --tag W1b --phase boot1 --strategy clicks \
+            --script .github/scripts/qa_wizard_guest.sh --vars "$RUNNER_TEMP/W-vars.fd" || echo "attempt 2 failed too (stop rule: report)"
+      - name: Inspect after boot 1
+        if: always()
+        run: sudo bash .github/scripts/qa_inspect.sh "$WORK/W.qcow2" "$OUT/$(cat "$OUT/BOOT1_TAG")-inspect.txt"
+      - name: "W2: boot 2 (wizard must not run, greeter shows the user, growth unchanged)"
+        if: always()
+        run: |
+          python3 .github/scripts/qa_vm_wizard.py --disk "$WORK/W.qcow2" --out "$OUT" --tag W2 --phase boot2 \
+            --script .github/scripts/qa_wizard_guest.sh --vars "$RUNNER_TEMP/W-vars.fd"
+          sudo bash .github/scripts/qa_inspect.sh "$WORK/W.qcow2" "$OUT/W2-inspect.txt"
+      - name: Checks
+        if: always()
+        run: |
+          rm -f "$WORK/W.qcow2" "$WORK/disk.raw"
+          python3 .github/scripts/qa_checks.py "$OUT" "${{ inputs.expected-digest }}"
+      - name: Upload evidence (logs, screenshots, hashes only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-vm-full-wizard-${{ inputs.source-run }}
+          path: qa-out/
+          retention-days: 30
+
+  power-cuts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prep runner, KVM, QEMU, OCR
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup "$AGENT_TOOLSDIRECTORY" || true
+          sudo mkdir -p "$WORK" && sudo chown "$USER" "$WORK"; mkdir -p "$OUT/shots"
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          sudo apt-get update -q && sudo apt-get install -yq qemu-system-x86 qemu-utils ovmf gdisk btrfs-progs ostree netpbm tesseract-ocr >/dev/null
+          ls -l /dev/kvm; qemu-system-x86_64 --version | head -1 | tee "$OUT/qemu-version.txt"; tesseract --version 2>&1 | head -1
+      - name: Fetch raw, verify sha256 (stop on mismatch)
+        working-directory: ${{ env.WORK }}
+        run: |
+          gh api "repos/${{ github.repository }}/actions/artifacts/${{ inputs.raw-artifact }}" --jq '[.id,.name,.digest,.workflow_run.id]|@tsv' | tee "$OUT/raw-artifact-meta.txt"
+          awk -F'\t' -v r="${{ inputs.source-run }}" '$4==r{f=1} END{exit !f}' "$OUT/raw-artifact-meta.txt" || { echo "artifact not from source run"; exit 1; }
+          gh api "repos/${{ github.repository }}/actions/artifacts/${{ inputs.raw-artifact }}/zip" > raw.zip
+          unzip -q raw.zip && rm raw.zip
+          XZ=$(find . -name disk.raw.xz | head -1); got=$(sha256sum "$XZ" | cut -d' ' -f1)
+          echo "$got  disk.raw.xz (expected ${{ inputs.raw-xz-sha256 }})" | tee "$OUT/hashes.txt"
+          [ "$got" = "${{ inputs.raw-xz-sha256 }}" ] || { echo "RAW HASH MISMATCH"; exit 1; }
+          find . -name 'SHA256SUMS*' -exec cat {} \; | tee -a "$OUT/hashes.txt"
+          xz -dc -T0 "$XZ" | cp --sparse=always /dev/stdin disk.raw; rm -f "$XZ"
+          sha256sum disk.raw | tee -a "$OUT/hashes.txt"
+          echo "expected image: ${{ inputs.expected-digest }}" | tee -a "$OUT/hashes.txt"
+      - name: "B: cut 1.0 s after Starting vettv-grow-root.service, then reboot"
+        run: |
+          qemu-img create -q -f qcow2 -b "$WORK/disk.raw" -F raw "$WORK/B.qcow2" 64G
+          python3 .github/scripts/qa_vm_boot.py --disk "$WORK/B.qcow2" --out "$OUT" --tag B1 --wait 240 --kill-on 'Starting.*(vettv-grow-root|grow root)' --kill-delay 1.0
+          sudo bash .github/scripts/qa_inspect.sh "$WORK/B.qcow2" "$OUT/B1-afterkill-inspect.txt"
+          python3 .github/scripts/qa_vm_boot.py --disk "$WORK/B.qcow2" --out "$OUT" --tag B2 --wait 300
+          sudo bash .github/scripts/qa_inspect.sh "$WORK/B.qcow2" "$OUT/B2-inspect.txt"
+          rm -f "$WORK/B.qcow2" /tmp/ovmf-vars.fd
+      - name: "C: cut 0.4 s after Starting vettv-grow-root.service, then reboot"
+        run: |
+          qemu-img create -q -f qcow2 -b "$WORK/disk.raw" -F raw "$WORK/C.qcow2" 64G
+          python3 .github/scripts/qa_vm_boot.py --disk "$WORK/C.qcow2" --out "$OUT" --tag C1 --wait 240 --kill-on 'Starting.*(vettv-grow-root|grow root)' --kill-delay 0.4
+          sudo bash .github/scripts/qa_inspect.sh "$WORK/C.qcow2" "$OUT/C1-afterkill-inspect.txt"
+          python3 .github/scripts/qa_vm_boot.py --disk "$WORK/C.qcow2" --out "$OUT" --tag C2 --wait 300
+          sudo bash .github/scripts/qa_inspect.sh "$WORK/C.qcow2" "$OUT/C2-inspect.txt"
+          rm -f "$WORK/C.qcow2" "$WORK/disk.raw"
+      - name: Cut checks
+        if: always()
+        run: |
+          {
+          for c in B C; do
+            k=$(cat "$OUT/${c}1-kill.txt" 2>/dev/null)
+            s=$(grep -oP 'root partition: \S+ size \K\d+' "$OUT/${c}2-inspect.txt" 2>/dev/null)
+            st=$(grep -A1 '^== stamp' "$OUT/${c}2-inspect.txt" 2>/dev/null | tail -1)
+            esp=$(grep -A0 'nbd0p2 files' "$OUT/${c}2-inspect.txt" | cut -c1-8)
+            if [ -n "$k" ] && [ "${s:-0}" -gt 60000000000 ] && echo "$st" | grep -q grow-root.done; then r=PASS; else r=FAIL; fi
+            echo "$r  cut $c: ${k:-no kill record}; after reboot root=$s; $st; ESP files $esp"
+          done
+          } | tee "$OUT/CHECKS-cuts.txt"
+          ! grep -q '^FAIL' "$OUT/CHECKS-cuts.txt"
+      - name: Upload evidence (logs, screenshots, hashes only)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qa-vm-full-cuts-${{ inputs.source-run }}
+          path: qa-out/
+          retention-days: 30

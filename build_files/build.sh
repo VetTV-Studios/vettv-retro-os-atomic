@@ -20,6 +20,14 @@ dnf5 -y install \
   flatpak
 # NOTE: DOSBox-X ships ONLY as the pinned Flathub Flatpak (first boot, Wolf gate), never the Fedora RPM.
 
+### First-run wizard (raw/qcow2 disks ship with no user account; no default user or password in the image)
+# KDE plasma-setup creates the first user (always added to wheel), language, keyboard, time zone.
+# Gated by plasma-setup.service.d/50-vettv-no-regular-user.conf (runs only while no UID>=1000 user exists).
+rpm -q plasma-setup || dnf5 -y install --setopt=install_weak_deps=False plasma-setup
+rpm -q plasma-setup
+test -f /usr/lib/systemd/system/plasma-setup.service
+test ! -e /etc/plasma-setup-done
+
 ### os-release (Fedora/uBlue name replaced; upstream license notices kept under /usr/share/licenses)
 FEDORA_VER="$(rpm -E %fedora)"
 cat > /usr/lib/os-release <<EOF
@@ -54,6 +62,7 @@ chmod 0600 "/usr/lib/modules/$KVER/initramfs.img"
 ### Services
 systemctl enable vettv-dosbox-x-flatpak.service
 systemctl enable vettv-grow-root.service
+systemctl enable plasma-setup.service
 
 ### Policy guard: no ROMs/BIOS/Microsoft system files in the image
 hits=$(find / -xdev \( -iname '*.rom' -o -iname 'bios*.bin' -o -iname '*.bios' \

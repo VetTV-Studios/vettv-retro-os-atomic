@@ -129,7 +129,7 @@ jobs:
           name: vettv-retro-os-${{ matrix.disk-type }}
           path: ${{ steps.build.outputs.output-directory }}
           if-no-files-found: error
-          retention-days: 0
+          retention-days: 90  # repo max (artifact-and-log-retention: 90/90)
           compression-level: 0
           overwrite: true
       

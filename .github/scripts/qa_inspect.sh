@@ -63,4 +63,5 @@ if [ -d "$J" ]; then
 else
   echo "no persistent journal at $J"
 fi
+echo "== vettv-qa probe markers (test VM only)"; for f in "$VAR"/lib/vettv-qa/*/markers.txt; do [ -f "$f" ] && { echo "-- $f"; cat "$f"; }; done
 umount $M; qemu-nbd --disconnect /dev/nbd0
