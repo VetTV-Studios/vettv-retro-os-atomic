@@ -14,6 +14,11 @@ on:
       raw-xz-sha256: {description: "expected sha256 of disk.raw.xz", required: true}
       qcow2-artifact: {description: "qcow2 artifact id (hashed only)", required: true}
       expected-digest: {description: "image digest the raw was built from (sha256:...)", required: true}
+      mode:
+        description: "full = wizard + full gate + power cuts; wizard-only = wizard checks only (Faye 11-25 13:46: growth/cuts/bootloader already passed on this raw)"
+        type: choice
+        options: [full, wizard-only]
+        default: full
 
 permissions:
   contents: read
@@ -36,7 +41,7 @@ jobs:
           sudo mkdir -p "$WORK" && sudo chown "$USER" "$WORK"; mkdir -p "$OUT/shots"
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
-          sudo apt-get update -q && sudo apt-get install -yq qemu-system-x86 qemu-utils ovmf gdisk btrfs-progs ostree netpbm tesseract-ocr >/dev/null
+          sudo apt-get update -q && sudo apt-get install -yq qemu-system-x86 qemu-utils ovmf gdisk btrfs-progs ostree netpbm tesseract-ocr python3-pil >/dev/null
           ls -l /dev/kvm; qemu-system-x86_64 --version | head -1 | tee "$OUT/qemu-version.txt"; tesseract --version 2>&1 | head -1
       - name: Fetch raw, verify sha256 (stop on mismatch)
         working-directory: ${{ env.WORK }}
@@ -53,6 +58,7 @@ jobs:
           sha256sum disk.raw | tee -a "$OUT/hashes.txt"
           echo "expected image: ${{ inputs.expected-digest }}" | tee -a "$OUT/hashes.txt"
       - name: Hash qcow2 artifact (not booted)
+        if: inputs.mode == 'full'
         working-directory: ${{ env.WORK }}
         run: |
           gh api "repos/${{ github.repository }}/actions/artifacts/${{ inputs.qcow2-artifact }}" --jq '[.id,.name,.digest,.workflow_run.id]|@tsv' | tee -a "$OUT/hashes.txt"
@@ -64,7 +70,7 @@ jobs:
       - name: "W0: ESP and /boot before first boot"
         run: |
           qemu-img create -q -f qcow2 -b "$WORK/disk.raw" -F raw "$WORK/W.qcow2" 64G
-          sudo bash .github/scripts/qa_inspect.sh "$WORK/W.qcow2" "$OUT/W0-inspect.txt"
+          [ "${{ inputs.mode }}" = full ] && sudo bash .github/scripts/qa_inspect.sh "$WORK/W.qcow2" "$OUT/W0-inspect.txt" || true
       - name: "W1: boot 1, wizard screenshot, drive wizard by QMP (attempt 1: keys)"
         id: w1
         continue-on-error: true
@@ -76,26 +82,26 @@ jobs:
         if: steps.w1.outcome == 'failure'
         run: |
           if grep -q '"wizard_up_s": null' "$OUT/W1-result.json" 2>/dev/null; then echo "wizard never came up in attempt 1; no retry"; exit 0; fi
-          sudo bash .github/scripts/qa_inspect.sh "$WORK/W.qcow2" "$OUT/W1-attempt1-inspect.txt"
+          [ "${{ inputs.mode }}" = full ] && sudo bash .github/scripts/qa_inspect.sh "$WORK/W.qcow2" "$OUT/W1-attempt1-inspect.txt" || true
           rm -f "$WORK/W.qcow2" "$RUNNER_TEMP/W-vars.fd"
           qemu-img create -q -f qcow2 -b "$WORK/disk.raw" -F raw "$WORK/W.qcow2" 64G
           echo W1b > "$OUT/BOOT1_TAG"
           python3 .github/scripts/qa_vm_wizard.py --disk "$WORK/W.qcow2" --out "$OUT" --tag W1b --phase boot1 --strategy clicks \
             --script .github/scripts/qa_wizard_guest.sh --vars "$RUNNER_TEMP/W-vars.fd" || echo "attempt 2 failed too (stop rule: report)"
       - name: Inspect after boot 1
-        if: always()
+        if: always() && inputs.mode == 'full'
         run: sudo bash .github/scripts/qa_inspect.sh "$WORK/W.qcow2" "$OUT/$(cat "$OUT/BOOT1_TAG")-inspect.txt"
       - name: "W2: boot 2 (wizard must not run, greeter shows the user, growth unchanged)"
         if: always()
         run: |
           python3 .github/scripts/qa_vm_wizard.py --disk "$WORK/W.qcow2" --out "$OUT" --tag W2 --phase boot2 \
             --script .github/scripts/qa_wizard_guest.sh --vars "$RUNNER_TEMP/W-vars.fd"
-          sudo bash .github/scripts/qa_inspect.sh "$WORK/W.qcow2" "$OUT/W2-inspect.txt"
+          [ "${{ inputs.mode }}" = full ] && sudo bash .github/scripts/qa_inspect.sh "$WORK/W.qcow2" "$OUT/W2-inspect.txt" || true
       - name: Checks
         if: always()
         run: |
           rm -f "$WORK/W.qcow2" "$WORK/disk.raw"
-          python3 .github/scripts/qa_checks.py "$OUT" "${{ inputs.expected-digest }}"
+          python3 .github/scripts/qa_checks.py "$OUT" "${{ inputs.expected-digest }}" "${{ inputs.mode }}"
       - name: Upload evidence (logs, screenshots, hashes only)
         if: always()
         uses: actions/upload-artifact@v4
@@ -105,6 +111,7 @@ jobs:
           retention-days: 30
 
   power-cuts:
+    if: inputs.mode == 'full'
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -115,7 +122,7 @@ jobs:
           sudo mkdir -p "$WORK" && sudo chown "$USER" "$WORK"; mkdir -p "$OUT/shots"
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
-          sudo apt-get update -q && sudo apt-get install -yq qemu-system-x86 qemu-utils ovmf gdisk btrfs-progs ostree netpbm tesseract-ocr >/dev/null
+          sudo apt-get update -q && sudo apt-get install -yq qemu-system-x86 qemu-utils ovmf gdisk btrfs-progs ostree netpbm tesseract-ocr python3-pil >/dev/null
           ls -l /dev/kvm; qemu-system-x86_64 --version | head -1 | tee "$OUT/qemu-version.txt"; tesseract --version 2>&1 | head -1
       - name: Fetch raw, verify sha256 (stop on mismatch)
         working-directory: ${{ env.WORK }}

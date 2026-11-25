@@ -93,17 +93,22 @@ def shot(name):
     os.remove(ppm); return png
 
 def ocr(png):
-    big = png[:-4] + ".x2.png"
-    subprocess.run(f"pngtopnm '{png}' | ppmtopgm | pamscale 2 | pnmtopng > '{big}'", shell=True, stderr=subprocess.DEVNULL)
-    out = subprocess.run(["tesseract", big, "-", "--psm", "11", "tsv"], capture_output=True, text=True).stdout
+    """Threshold + 3x upscale before tesseract (run 45678808835: raw greyscale read only noise on
+    the wallpaper). Variants: white text at 215/180/160, dark text at 90; words merged."""
+    from PIL import Image
+    im = Image.open(png).convert("L"); words = []
+    big = png[:-4] + ".ocr.png"
+    variants = [lambda p, t=t: 0 if p > t else 255 for t in (215, 180, 160)] + [lambda p: 0 if p < 90 else 255]
+    for vi, fn in enumerate(variants):
+        im.point(fn).resize((im.width * 3, im.height * 3)).save(big)
+        out = subprocess.run(["tesseract", big, "-", "--psm", "11", "tsv"], capture_output=True, text=True).stdout
+        for line in out.splitlines()[1:]:
+            c = line.split("\t")
+            if len(c) == 12 and c[11].strip() and float(c[10]) > 30:
+                x, y, w, h = (int(v) / 3 for v in c[6:10])
+                words.append({"t": c[11].strip(), "x": x, "y": y, "w": w, "h": h, "v": vi})
     os.remove(big)
-    words = []
-    for line in out.splitlines()[1:]:
-        c = line.split("\t")
-        if len(c) == 12 and c[11].strip() and float(c[10]) > 30:
-            x, y, w, h = (int(v) / 2 for v in c[6:10])
-            words.append({"t": c[11].strip(), "x": x, "y": y, "w": w, "h": h})
-    return words
+    return words   # grouped by variant, tesseract order within each
 
 def leaks(flat):
     """True if any 6-char piece of the test password shows up in OCR text."""
@@ -135,7 +140,7 @@ def find(words, *phrase, region=None):
     """center of the first run of consecutive words matching phrase (case-insensitive)."""
     n = len(phrase)
     for i in range(len(words) - n + 1):
-        if all(words[i + k]["t"].strip(".,:").lower() == phrase[k].lower() for k in range(n)):
+        if all(words[i + k]["t"].strip(".,:").lower() == phrase[k].lower() and words[i + k].get("v") == words[i].get("v") for k in range(n)):
             ws = words[i:i + n]
             x0, y0 = ws[0]["x"], min(w["y"] for w in ws)
             x1 = ws[-1]["x"] + ws[-1]["w"]; y1 = max(w["y"] + w["h"] for w in ws)
@@ -196,8 +201,10 @@ def drive():
         else: stall = 0
         last = flat
         if stall >= 4: log("no screen change for 4 steps"); return False
-        b = find(ws, "Begin", "Setup")
-        if b:
+        if step == 1 or find(ws, "Welcome", "to"):
+            b = find(ws, "Begin", "Setup")
+            if step == 1 or not b:
+                log(f"step {step}: landing; Return on the focused Begin Setup"); key("ret"); time.sleep(3); continue
             log(f"step {step}: Begin Setup at {b[:2]}"); click(*b[:2]); time.sleep(3); continue
         is_acct = find(ws, "Username") and find(ws, "Password")
         if is_acct and len(acct_tries) < 2:
