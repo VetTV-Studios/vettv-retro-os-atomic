@@ -98,7 +98,7 @@ jobs:
           python3 .github/scripts/qa_checks.py "$OUT" "${{ inputs.expected-digest }}"
       - name: Upload evidence (logs, screenshots, hashes only)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: qa-vm-full-wizard-${{ inputs.source-run }}
           path: qa-out/
@@ -163,7 +163,7 @@ jobs:
           ! grep -q '^FAIL' "$OUT/CHECKS-cuts.txt"
       - name: Upload evidence (logs, screenshots, hashes only)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: qa-vm-full-cuts-${{ inputs.source-run }}
           path: qa-out/
