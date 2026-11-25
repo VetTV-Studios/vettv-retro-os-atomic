@@ -13,6 +13,13 @@ flatpak update --system -y --noninteractive --commit=$COMMIT $APP
 flatpak mask --system $APP   # stop auto-updates drifting off the pin
 got=$(flatpak info --system --show-commit $APP)
 [ "$got" = "$COMMIT" ] || { echo "vettv-dosbox-x: installed commit $got != pinned $COMMIT" >&2; exit 1; }
+# Runtime pin (Faye 11-17 beta rule; Priya 11-25): hold org.freedesktop.Platform at the pinned commit too.
+RT=$DOSBOX_X_RUNTIME; RTC=$DOSBOX_X_RUNTIME_COMMIT
+case "$RT$RTC" in *[!A-Za-z0-9._/-]*|"") echo "vettv-dosbox-x: runtime not pinned, refusing" >&2; exit 1;; esac
+flatpak update --system -y --noninteractive --commit=$RTC $RT
+flatpak mask --system $RT
+got=$(flatpak info --system --show-commit $RT)
+[ "$got" = "$RTC" ] || { echo "vettv-dosbox-x: runtime commit $got != pinned $RTC" >&2; exit 1; }
 # Game folders: grant read-only access to the h2h game mount (QA must verify sandbox access).
 flatpak override --system --filesystem=/srv/games:ro --filesystem=~/games:ro \
   --filesystem=/opt/vettv-h2h:ro --filesystem=xdg-state/vettv-h2h:create $APP
