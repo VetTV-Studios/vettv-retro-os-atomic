@@ -2,6 +2,7 @@
 # Guest-side diagnostics for bootloader-update.service (run as root inside the
 # QA VM). Every section is framed by @@BEGIN/@@END markers on stdout so the host
 # can split the serial stream; large journals go out as xz+base64.
+trap '' HUP   # serial-getty@ttyS0 vhangup()s the tty when it starts
 export SYSTEMD_COLORS=0 SYSTEMD_PAGER=cat SYSTEMD_LESS= PAGER=cat LANG=C.UTF-8 COLUMNS=250 TERM=dumb
 [ -t 1 ] && stty cols 250 rows 60 2>/dev/null
 dmesg -n 1 2>/dev/null; kill -s RTMIN+21 1 2>/dev/null   # keep kernel/systemd status off ttyS0 while dumping
@@ -22,6 +23,9 @@ if [ "${#BOOTS[@]}" -le 1 ]; then
   exit 0
 fi
 timeout 240 systemctl is-system-running --wait; sleep 15
+# reopen ttyS0: the fd opened at unit start was hung up when serial-getty@ttyS0 started (run 45518216557)
+exec >/dev/ttyS0 2>&1
+printf '@@INFO boot-2 dump starting@@\n'
 sec 00-aleph "$ALEPH"
 RX='ostree|rpm-ostree|bootc|reboot|finaliz|stag|rebase|signed|ublue|bazzite|first.?boot|systemctl reboot'
 sec 01-systemctl-status-bootloader-update 'systemctl status bootloader-update --no-pager -l'
