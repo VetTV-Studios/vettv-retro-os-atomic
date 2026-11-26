@@ -137,19 +137,51 @@ elif gate == "passed":
     chk("boot 2 failed units only nvidia-cdi-refresh.path/.service",
         bool(fl2) and not other, ", ".join(units) or "0 units")
     ver = d("15-flatpak-version")
-    cmd_line = next((l.split(":", 1)[1].strip() for l in ver.splitlines() if l.startswith("command:")), "")
+    def field(key):
+        return next((l.split(":", 1)[1].strip() for l in ver.splitlines() if l.startswith(key + ":") and not l.startswith("informational")), "")
+    def evline(prefix):
+        return next((l for l in ver.splitlines() if l.startswith(prefix)), "")
+    cmd_line = field("command")
+    inner_cmd = field("inner-command") or "/usr/bin/flatpak run com.dosbox_x.DOSBox-X --version"
+    method = field("method")
+    id_line = evline("id:") or field("id")
+    home = evline("HOME=")
+    user = evline("USER=")
+    xdg = evline("XDG_RUNTIME_DIR=") or evline("XDG_RUNTIME_DIR:")
+    dbus = evline("DBUS_SESSION_BUS_ADDRESS=") or evline("DBUS_SESSION_BUS_ADDRESS:")
+    display = evline("DISPLAY=") or evline("DISPLAY:")
+    wayland = evline("WAYLAND_DISPLAY=") or evline("WAYLAND_DISPLAY:")
     em = re.search(r"^exit: (\d+)\s*$", ver, re.M)
     exit_code = em.group(1) if em else ""
     if not exit_code and ver:
         wm = re.search(r"\(exit (\d+)\)", ver.splitlines()[0])
         exit_code = wm.group(1) if wm else ""
-    om = re.search(r"^output:\n(.*)", ver, re.M | re.S)
-    body = (om.group(1).rstrip() if om else "\n".join(l for l in ver.splitlines() if not l.startswith("#####")))
-    ev_txt = f"command: {cmd_line or '(missing)'}\nexit: {exit_code or '(missing)'}\noutput:\n{body}\n"
+    om = re.search(r"^output:\n(.*?)(?=\ninformational |\Z)", ver, re.M | re.S)
+    body = (om.group(1).rstrip() if om else "")
+    info = "\n".join(l for l in ver.splitlines() if l.startswith("informational"))
+    ev_txt = "\n".join([
+        f"method: {method or '(missing)'}",
+        f"command: {cmd_line or '(missing)'}",
+        f"inner-command: {inner_cmd}",
+        id_line or "id: (missing)",
+        home or "HOME=",
+        user or "USER=",
+        xdg or "XDG_RUNTIME_DIR: (missing)",
+        dbus or "DBUS_SESSION_BUS_ADDRESS: (missing)",
+        display or "DISPLAY: (missing)",
+        wayland or "WAYLAND_DISPLAY: (missing)",
+        f"exit: {exit_code or '(missing)'}",
+        "output:",
+        body or "(no --version output)",
+        info,
+    ]) + "\n"
     open(os.path.join(O, "flatpak-run-version.txt"), "w").write(ev_txt)
-    ver_ok = exit_code == "0"
-    chk("flatpak run com.dosbox_x.DOSBox-X --version exits 0",
-        ver_ok, f"command: {cmd_line or '(missing)'}; exit: {exit_code or '(missing)'}; " + (body.splitlines()[0] if body else "no output"))
+    home_val = home.split("=", 1)[1] if "=" in home else ""
+    as_qatest = "uid=1000(qatest)" in id_line and bool(home_val)
+    has_ver = "2026.08.31" in body
+    ver_ok = exit_code == "0" and as_qatest and has_ver
+    chk("flatpak run com.dosbox_x.DOSBox-X --version exits 0 as qatest and prints 2026.08.31",
+        ver_ok, f"method: {method or '?'}; command: {cmd_line or inner_cmd or '(missing)'}; {id_line or 'id missing'}; {home or 'HOME missing'}; exit: {exit_code or '(missing)'}; " + ((body.splitlines()[0] if body else "no output")))
     open(os.path.join(O, "flatpak-mask.txt"), "w").write(msk)
     # Image diff vs vettv.4 (155292f): only the override path line and VETTV_REV 4->5.
     V4 = "155292fc52df9a835e3eb53b77ea8d5f786bed27"
