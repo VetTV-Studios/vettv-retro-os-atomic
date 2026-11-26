@@ -38,7 +38,7 @@ jobs:
       OUT: ${{ github.workspace }}/qa-out
       WORK: /mnt/qa
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Prep runner, KVM, QEMU
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup "$AGENT_TOOLSDIRECTORY" || true
