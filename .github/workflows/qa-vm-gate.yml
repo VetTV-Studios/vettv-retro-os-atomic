@@ -46,7 +46,7 @@ jobs:
       OUT: ${{ github.workspace }}/qa-out
       WORK: /mnt/qa
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Free runner disk
         run: |
