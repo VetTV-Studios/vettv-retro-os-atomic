@@ -137,10 +137,19 @@ elif gate == "passed":
     chk("boot 2 failed units only nvidia-cdi-refresh.path/.service",
         bool(fl2) and not other, ", ".join(units) or "0 units")
     ver = d("15-flatpak-version")
-    open(os.path.join(O, "flatpak-run-version.txt"), "w").write(ver)
-    ver_ok = bool(ver) and "(exit 0)" in ver.splitlines()[0]
-    ver_line = next((l.strip() for l in ver.splitlines() if l.strip() and not l.startswith("#####")), "no version output")
-    chk("flatpak run com.dosbox_x.DOSBox-X --version exits 0", ver_ok, ver_line)
+    cmd_line = next((l.split(":", 1)[1].strip() for l in ver.splitlines() if l.startswith("command:")), "")
+    em = re.search(r"^exit: (\d+)\s*$", ver, re.M)
+    exit_code = em.group(1) if em else ""
+    if not exit_code and ver:
+        wm = re.search(r"\(exit (\d+)\)", ver.splitlines()[0])
+        exit_code = wm.group(1) if wm else ""
+    om = re.search(r"^output:\n(.*)", ver, re.M | re.S)
+    body = (om.group(1).rstrip() if om else "\n".join(l for l in ver.splitlines() if not l.startswith("#####")))
+    ev_txt = f"command: {cmd_line or '(missing)'}\nexit: {exit_code or '(missing)'}\noutput:\n{body}\n"
+    open(os.path.join(O, "flatpak-run-version.txt"), "w").write(ev_txt)
+    ver_ok = exit_code == "0"
+    chk("flatpak run com.dosbox_x.DOSBox-X --version exits 0",
+        ver_ok, f"command: {cmd_line or '(missing)'}; exit: {exit_code or '(missing)'}; " + (body.splitlines()[0] if body else "no output"))
     open(os.path.join(O, "flatpak-mask.txt"), "w").write(msk)
     # Image diff vs vettv.4 (155292f): only the override path line and VETTV_REV 4->5.
     V4 = "155292fc52df9a835e3eb53b77ea8d5f786bed27"

@@ -31,7 +31,7 @@ sec o${B}-11-flatpak-mask flatpak mask --system
 sec o${B}-12-flatpak-override flatpak override --system --show com.dosbox_x.DOSBox-X
 sec o${B}-13-done-stamp bash -c 'if [ -e /var/lib/vettv/dosbox-x-flatpak.done ]; then echo "done-stamp: present"; ls -l /var/lib/vettv/dosbox-x-flatpak.done; echo "-- contents --"; cat /var/lib/vettv/dosbox-x-flatpak.done; else echo "done-stamp: MISSING"; ls -la /var/lib/vettv/ 2>&1; fi'
 sec o${B}-14-failed-units systemctl --failed --no-pager
-sec o${B}-15-flatpak-version bash -c 'export SDL_VIDEODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 QT_QPA_PLATFORM=offscreen DISPLAY= WAYLAND_DISPLAY=; timeout 60 flatpak --system run com.dosbox_x.DOSBox-X --version'
+sec o${B}-15-flatpak-version bash -c 'unset DISPLAY WAYLAND_DISPLAY; export SDL_VIDEODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 QT_QPA_PLATFORM=offscreen; set -- timeout 60 flatpak --system run com.dosbox_x.DOSBox-X --version; printf "command:"; printf " %q" "$@"; printf "\n"; if [ -z "${DISPLAY+x}" ]; then echo "DISPLAY: unset"; else echo "DISPLAY: set to [$DISPLAY]"; fi; if [ -z "${WAYLAND_DISPLAY+x}" ]; then echo "WAYLAND_DISPLAY: unset"; else echo "WAYLAND_DISPLAY: set to [$WAYLAND_DISPLAY]"; fi; set +e; output=$("$@" 2>&1); rc=$?; set -e; printf "exit: %s\n" "$rc"; printf "output:\n%s\n" "$output"; exit "$rc"'
 printf '@@ONLINE-DONE boot=%s@@\n' "$B" | tty
 # After a successful first install, reboot once so boot 2 can prove the service
 # is skipped by ConditionPathExists. A first-boot auto-reboot may already be

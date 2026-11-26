@@ -12,12 +12,13 @@ on:
       source-run: {description: "build-disk run id", required: true}
       raw-artifact: {description: "raw artifact id", required: true}
       raw-xz-sha256: {description: "expected sha256 of disk.raw.xz", required: true}
+      raw-sha256: {description: "expected sha256 of decompressed disk.raw (checked before boot); blank skips the compare; record pins at fetch"}
       qcow2-artifact: {description: "qcow2 artifact id (hashed only)", required: true}
       expected-digest: {description: "image digest the raw was built from (sha256:...)", required: true}
       mode:
-        description: "full = wizard + full gate + power cuts; wizard-only = wizard checks only (Faye 11-25 13:46: growth/cuts/bootloader already passed on this raw)"
+        description: "full = wizard + online + power cuts; wizard-only = wizard checks only; online-only = online DOSBox-X job only (same raw, harness rerun)"
         type: choice
-        options: [full, wizard-only]
+        options: [full, wizard-only, online-only]
         default: full
 
 permissions:
@@ -31,6 +32,7 @@ env:
 
 jobs:
   wizard-gate:
+    if: inputs.mode != 'online-only'
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     steps:
@@ -55,7 +57,14 @@ jobs:
           [ "$got" = "${{ inputs.raw-xz-sha256 }}" ] || { echo "RAW HASH MISMATCH"; exit 1; }
           find . -name 'SHA256SUMS*' -exec cat {} \; | tee -a "$OUT/hashes.txt"
           xz -dc -T0 "$XZ" | cp --sparse=always /dev/stdin disk.raw; rm -f "$XZ"
-          sha256sum disk.raw | tee -a "$OUT/hashes.txt"
+          got_raw=$(sha256sum disk.raw | tee -a "$OUT/hashes.txt" | cut -d' ' -f1)
+          want_raw="${{ inputs.raw-sha256 }}"
+          if [ -n "$want_raw" ] && [ "$want_raw" != "record" ]; then
+            echo "$got_raw  disk.raw before boot (expected $want_raw)" | tee -a "$OUT/hashes.txt"
+            [ "$got_raw" = "$want_raw" ] || { echo "RAW HASH MISMATCH"; exit 1; }
+          else
+            echo "$got_raw  disk.raw before boot" | tee -a "$OUT/hashes.txt"
+          fi
           echo "expected image: ${{ inputs.expected-digest }}" | tee -a "$OUT/hashes.txt"
       - name: Hash qcow2 artifact (not booted)
         if: inputs.mode == 'full'
@@ -111,11 +120,13 @@ jobs:
           retention-days: 30
 
   online-first-boot:
-    if: inputs.mode == 'full'   # permanent online check (Faye/Naomi 11-25); ONLY job with a NIC
+    if: inputs.mode == 'full' || inputs.mode == 'online-only'   # ONLY job with a NIC; online-only is a same-raw harness rerun
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Prep runner, KVM, QEMU, OCR
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup "$AGENT_TOOLSDIRECTORY" || true
@@ -136,7 +147,14 @@ jobs:
           [ "$got" = "${{ inputs.raw-xz-sha256 }}" ] || { echo "RAW HASH MISMATCH"; exit 1; }
           find . -name 'SHA256SUMS*' -exec cat {} \; | tee -a "$OUT/hashes.txt"
           xz -dc -T0 "$XZ" | cp --sparse=always /dev/stdin disk.raw; rm -f "$XZ"
-          sha256sum disk.raw | tee -a "$OUT/hashes.txt"
+          got_raw=$(sha256sum disk.raw | tee -a "$OUT/hashes.txt" | cut -d' ' -f1)
+          want_raw="${{ inputs.raw-sha256 }}"
+          if [ -n "$want_raw" ] && [ "$want_raw" != "record" ]; then
+            echo "$got_raw  disk.raw before boot (expected $want_raw)" | tee -a "$OUT/hashes.txt"
+            [ "$got_raw" = "$want_raw" ] || { echo "RAW HASH MISMATCH"; exit 1; }
+          else
+            echo "$got_raw  disk.raw before boot" | tee -a "$OUT/hashes.txt"
+          fi
           echo "expected image: ${{ inputs.expected-digest }}" | tee -a "$OUT/hashes.txt"
       - name: "N1: first boot WITH user-mode networking; DOSBox-X install service result"
         run: |
@@ -180,7 +198,14 @@ jobs:
           [ "$got" = "${{ inputs.raw-xz-sha256 }}" ] || { echo "RAW HASH MISMATCH"; exit 1; }
           find . -name 'SHA256SUMS*' -exec cat {} \; | tee -a "$OUT/hashes.txt"
           xz -dc -T0 "$XZ" | cp --sparse=always /dev/stdin disk.raw; rm -f "$XZ"
-          sha256sum disk.raw | tee -a "$OUT/hashes.txt"
+          got_raw=$(sha256sum disk.raw | tee -a "$OUT/hashes.txt" | cut -d' ' -f1)
+          want_raw="${{ inputs.raw-sha256 }}"
+          if [ -n "$want_raw" ] && [ "$want_raw" != "record" ]; then
+            echo "$got_raw  disk.raw before boot (expected $want_raw)" | tee -a "$OUT/hashes.txt"
+            [ "$got_raw" = "$want_raw" ] || { echo "RAW HASH MISMATCH"; exit 1; }
+          else
+            echo "$got_raw  disk.raw before boot" | tee -a "$OUT/hashes.txt"
+          fi
           echo "expected image: ${{ inputs.expected-digest }}" | tee -a "$OUT/hashes.txt"
       - name: "B: cut 1.0 s after Starting vettv-grow-root.service, then reboot"
         run: |
